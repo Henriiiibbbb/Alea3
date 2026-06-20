@@ -2,9 +2,13 @@
 // Cache la clé (env THE_ODDS_API_KEY) et règle le CORS.
 // Renvoie : { "Nom compétition": [ {home,away,time,offset,markets:[{type,sels,odds}]} ] }
 //
-// ⚠️ Le foot demande maintenant 5 marchés (h2h,totals,btts,double_chance,draw_no_bet) au lieu de 2 :
-// ça coûte ~2,5x plus de crédits par appel chez The Odds API. Le cache de 2 min (en bas du fichier)
-// limite la casse, mais surveille ta conso sur the-odds-api.com si tu approches le palier gratuit.
+// Le foot demande jusqu'à 7 marchés (h2h,totals,btts,double_chance,draw_no_bet,h2h_h1,totals_h1) au
+// lieu de 2 à l'origine : ça coûte plus de crédits par appel chez The Odds API. Le cache de 2 min
+// (en bas du fichier) limite la casse, mais surveille ta conso sur the-odds-api.com si tu approches
+// le palier gratuit. Les marchés mi-temps (h2h_h1/totals_h1) sont EXPÉRIMENTAUX : la doc officielle
+// les associe surtout à l'endpoint historique (payant, 10x le coût), pas garanti qu'ils remontent en
+// direct. D'où le filet de sécurité à 3 paliers ci-dessous : si le palier le plus riche échoue, on
+// retombe sur celui qui marchait déjà, jamais sur rien.
 // Les marchés joueurs (buteur...) ne sont eux PAS disponibles pour la Coupe du Monde, quel que soit
 // l'effort mis ici — réservés à EPL/Ligue 1/Bundesliga/Serie A/Liga/MLS, et via bookmakers US.
 
@@ -103,8 +107,51 @@ function buildMarkets(ev, isTennis) {
     if (dnb && dnb.outcomes?.length === 2) {
       out.push({ type: "Pari remboursé si match nul (Draw No Bet)", sels: dnb.outcomes.map(o => o.name), odds: dnb.outcomes.map(o => o.price) });
     }
+    // Mi-temps (expérimental — pas garanti disponible en live, voir commentaire plus haut)
+    const h1 = bk.markets?.find(m => m.key === "h2h_h1");
+    if (h1) {
+      const home = h1.outcomes.find(o => o.name === ev.home_team);
+      const away = h1.outcomes.find(o => o.name === ev.away_team);
+      const draw = h1.outcomes.find(o => o.name === "Draw");
+      if (home && away && draw)
+        out.push({ type: "Résultat à la mi-temps", sels: [home.name, "Match nul", away.name], odds: [home.price, draw.price, away.price] });
+    }
+    const t1 = bk.markets?.find(m => m.key === "totals_h1");
+    if (t1 && t1.outcomes?.length >= 2) {
+      const over = t1.outcomes.find(o => /over/i.test(o.name));
+      const under = t1.outcomes.find(o => /under/i.test(o.name));
+      if (over && under) {
+        const pt = over.point ?? "";
+        out.push({ type: "Plus ou moins de buts en première mi-temps", sels: [`+${pt} but (1re MT)`, `-${pt} but (1re MT)`], odds: [over.price, under.price] });
+      }
+    }
   }
   return out;
+}
+
+// Score en direct : 1 crédit/appel (2 si on demandait l'historique, ce qu'on ne fait pas ici).
+// On ne l'appelle que pour "aujourd'hui" (day=0) — inutile de le payer pour les matchs de demain,
+// qui n'ont jamais de score. Fusion par id d'événement (le plus fiable, pas par nom d'équipe).
+async function fetchScores(key, apiKey) {
+  try {
+    const r = await fetch(`https://api.the-odds-api.com/v4/sports/${key}/scores/?apiKey=${apiKey}&dateFormat=iso`);
+    if (!r.ok) return [];
+    return await r.json();
+  } catch (_) { return []; }
+}
+function attachScores(matches, scoreEvents) {
+  if (!scoreEvents || !scoreEvents.length) return;
+  const byId = new Map(scoreEvents.map(s => [s.id, s]));
+  for (const m of matches) {
+    const s = byId.get(m.id);
+    if (!s || !s.scores) continue;
+    const hs = s.scores.find(x => x.name === m.home);
+    const as = s.scores.find(x => x.name === m.away);
+    if (hs && as) {
+      m.score = { home: Number(hs.score), away: Number(as.score) };
+      m.completed = !!s.completed;
+    }
+  }
 }
 
 export default async function handler(req, res) {
@@ -121,29 +168,38 @@ export default async function handler(req, res) {
 
   const result = {};
   for (const { key, comp } of targets) {
-    const fullParam = isTennis ? "h2h,totals" : "h2h,totals,btts,double_chance,draw_no_bet";
+    // 3 paliers, du plus riche au plus sûr — on ne perd jamais ce qui marchait avant si un palier échoue.
+    const tiers = isTennis ? ["h2h,totals"] : [
+      "h2h,totals,btts,double_chance,draw_no_bet,h2h_h1,totals_h1", // tente aussi la mi-temps (expérimental)
+      "h2h,totals,btts,double_chance,draw_no_bet",                 // palier connu pour fonctionner
+      "h2h,totals",                                                 // base minimale, ne doit jamais échouer
+    ];
     const baseUrl = `https://api.the-odds-api.com/v4/sports/${key}/odds`
       + `?apiKey=${apiKey}&regions=fr&oddsFormat=decimal&dateFormat=iso&markets=`;
     try {
-      let r = await fetch(baseUrl + fullParam);
-      if (!r.ok && fullParam !== "h2h,totals") {
-        // un des marchés additionnels n'est probablement pas accepté pour ce sport/cette région :
-        // on retente avec uniquement les 2 marchés de base, pour ne jamais perdre l'affichage.
-        r = await fetch(baseUrl + "h2h,totals");
+      let r, events;
+      for (const tier of tiers) {
+        r = await fetch(baseUrl + tier);
+        if (r.ok) { events = await r.json(); break; }
       }
-      if (!r.ok) continue;                 // compétition hors-saison / non couverte : on saute
-      const events = await r.json();
+      if (!r || !r.ok || !events) continue;  // compétition hors-saison / non couverte : on saute
       const matches = [];
       for (const ev of events) {
         if (parisDateKey(ev.commence_time) !== wantKey) continue;
         const markets = buildMarkets(ev, isTennis);
         if (!markets.length) continue;
         matches.push({
-          home: ev.home_team, away: ev.away_team,
+          id: ev.id, home: ev.home_team, away: ev.away_team,
           time: parisTime(ev.commence_time), date: parisDateKey(ev.commence_time), offset: day, markets,
         });
       }
-      if (matches.length) result[comp] = matches;
+      if (matches.length) {
+        if (day === 0) {
+          const scoreEvents = await fetchScores(key, apiKey);
+          attachScores(matches, scoreEvents);
+        }
+        result[comp] = matches;
+      }
     } catch (_) { /* on ignore une compétition en erreur */ }
   }
   res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=300"); // limite la conso de crédits
