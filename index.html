@@ -130,11 +130,6 @@
   .catbtn .cn{font-family:var(--disp);font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center;gap:7px} .catbtn .cd{width:8px;height:8px;border-radius:50%;background:var(--c)} .catbtn .cb{font-family:var(--mono);font-size:9.5px;color:var(--txt-mut);margin-top:4px}
   .catbtn[data-cat="sage"]{--c:var(--sage)} .catbtn[data-cat="normal"]{--c:var(--normal)} .catbtn[data-cat="fun"]{--c:var(--fun)}
   .catnote{font-size:12.5px;color:var(--txt-mut);margin:13px 2px 2px;line-height:1.5}
-  .cats.dimmed{opacity:.4;pointer-events:none;transition:opacity .15s}
-  .mtabs{display:flex;gap:7px;overflow-x:auto;padding:0 0 4px;-webkit-overflow-scrolling:touch}
-  .mtabs::-webkit-scrollbar{height:4px}.mtabs::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
-  .mtab{flex:0 0 auto;font-family:var(--disp);font-weight:600;font-size:12.5px;color:var(--txt-mut);background:var(--ink-2);border:1px solid var(--line);border-radius:999px;padding:7px 13px;white-space:nowrap}
-  .mtab[aria-pressed="true"]{background:var(--accent);color:var(--ink);border-color:var(--accent)}
   .list{padding:8px 0 0;display:flex;flex-direction:column;gap:14px}
 
   /* MATCH CARD */
@@ -432,7 +427,7 @@ const DEMO={
 const CONFIG={ SAGE_MIN:0.62, NORMAL_LOW:0.40, FUN_MAX:0.33, MAX_PICKS:6,
   ODDS_ENDPOINT:'/api/odds',
   WHY_ENDPOINT:(location.hostname.endsWith('vercel.app')||location.hostname.endsWith('.now.sh'))?'/api/why':'https://api.anthropic.com/v1/messages' };
-const state={ sport:null, dayOffset:0, category:'sage', live:false, matchKey:null, marketType:'all' };
+const state={ sport:null, dayOffset:0, category:'sage', live:false, matchKey:null };
 let prof={ firstName:'', username:'', favs:[] };
 
 function loadProf(){try{const r=Store.get('alea_profile');if(r){const p=JSON.parse(r);prof.firstName=p.firstName||'';prof.username=p.username||'';prof.favs=Array.isArray(p.favs)?p.favs:[];}}catch(e){}}
@@ -496,30 +491,25 @@ async function renderBoard(){
     </button>`;
   }).join('');
 }
-function marketTypesFor(match){const seen=new Set();const order=[];for(const mk of match.markets){if(!seen.has(mk.type)){seen.add(mk.type);order.push(mk.type);}}return order;}
-function buildPicksForMatch(match,category,marketType){
+function buildPicksForMatch(match,category){
   const favSet=new Set(prof.favs);const meta=metaFor(match);const cands=[];
-  const byCat=!marketType||marketType==='all';
   for(const mk of match.markets){
-    if(marketType&&marketType!=='all'&&mk.type!==marketType)continue;
     const pr=probsFor(mk);
     for(let i=0;i<mk.sels.length;i++){if(isNegativeSel(mk.sels[i]))continue;const p=pr[i];
-      if(byCat){const ok=category==='sage'?p>=CONFIG.SAGE_MIN:category==='normal'?(p>=CONFIG.NORMAL_LOW&&p<CONFIG.SAGE_MIN):(p<=CONFIG.FUN_MAX&&p>=0.04);if(!ok)continue;}
+      const ok=category==='sage'?p>=CONFIG.SAGE_MIN:category==='normal'?(p>=CONFIG.NORMAL_LOW&&p<CONFIG.SAGE_MIN):(p<=CONFIG.FUN_MAX&&p>=0.04);
+      if(!ok)continue;
       const note=(match.notes&&match.notes[mk.sels[i]])||'';
       cands.push({comp:match.comp,home:match.home,away:match.away,time:match.time,sel:mk.sels[i],market:mk.type,odd:mk.odds[i],prob:p,raw:!!mk.raw,fav:favSet.has(mk.type),note,meta,stats:match.stats||null});
     }}
-  cands.sort((a,b)=>{if(a.fav!==b.fav)return a.fav?-1:1;return (byCat&&category==='fun')?b.odd-a.odd:b.prob-a.prob;});
+  cands.sort((a,b)=>{if(a.fav!==b.fav)return a.fav?-1:1;return category==='fun'?b.odd-a.odd:b.prob-a.prob;});
   return cands.slice(0,CONFIG.MAX_PICKS);
 }
 function renderMatchDetail(){
   const match=lastMatchByKey[state.matchKey];
   if(!match){show('board');return;}
-  const types=marketTypesFor(match);
-  if(!state.marketType||(state.marketType!=='all'&&!types.includes(state.marketType)))state.marketType='all';
   document.querySelectorAll('#matchView .catbtn').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.cat===state.category)));
-  $('catsBox').classList.toggle('dimmed',state.marketType!=='all');
-  const picks=buildPicksForMatch(match,state.category,state.marketType);
-  $('catNote').textContent=state.marketType==='all'?catNoteText(picks.length):`${picks.length} option${picks.length>1?'s':''} pour ce marché`;
+  const picks=buildPicksForMatch(match,state.category);
+  $('catNote').textContent=catNoteText(picks.length);
   $('mvList').innerHTML=matchBlock(picks,match);
   requestAnimationFrame(()=>{document.querySelectorAll('#mvList .prow-bar i').forEach(f=>f.style.width=f.dataset.w+'%');});
 }
@@ -531,18 +521,12 @@ function matchBlock(items,match){
   const analysisHtml=`<div class="analysis"><div class="an-head"><span class="t">Analyse générale du match</span><button class="refresh" data-refresh="${esc(match.home+'|'+match.away)}">↻ Dernières infos</button></div><div class="an-body">${rows.map(r=>`<div class="an-row"><span class="k">${esc(r[0])}</span><span class="v">${esc(r[1])}</span></div>`).join('')}</div></div>`;
   const trio=smartTrio(match);
   const trioHtml=trio.length?`<div class="smart"><div class="sl">⚡ Pari intelligent</div><div class="smart-row">${trio.map((t,i)=>{const pl=enc({sport:state.sport,comp:match.comp,home:match.home,away:match.away,time:match.time,day:state.dayOffset,sel:t.sel,market:t.market,odd:t.odd,prob:t.prob,raw:t.raw,meta:t.meta,stats:t.stats});return `<button class="sbet s${i+1}" data-why="${pl}"><span class="st">${t.kind}</span><span class="ss">${esc(t.sel)}</span><span class="so">≈${t.odd.toFixed(2)}</span></button>`;}).join('')}</div></div>`:'';
-  const types=marketTypesFor(match);
-  const activeType=(state.marketType&&(state.marketType==='all'||types.includes(state.marketType)))?state.marketType:'all';
-  const tabsHtml=`<div class="mtabs"><button class="mtab" data-mtype="all" aria-pressed="${activeType==='all'}">Tous</button>${types.map(t=>`<button class="mtab" data-mtype="${esc(t)}" aria-pressed="${activeType===t}">${esc(t)}</button>`).join('')}</div>`;
-  const picksLabel=activeType==='all'?`Paris conseillés · « ${catLabel()} »`:esc(activeType);
   const picksHtml=items.length
-    ? `<div class="picks"><div class="pl">${picksLabel}</div>${items.map(pickRow).join('')}</div>`
-    : `<div class="picks"><div class="empty" style="margin-top:2px"><b>Rien ${activeType==='all'?`dans « ${catLabel()} »`:'ici'} pour ce match.</b><br>${activeType==='all'?'Essaie une autre catégorie.':'Essaie un autre type de pari.'}</div></div>`;
+    ? `<div class="picks"><div class="pl">Paris conseillés · « ${catLabel()} »</div>${items.map(pickRow).join('')}</div>`
+    : `<div class="picks"><div class="empty" style="margin-top:2px"><b>Rien dans « ${catLabel()} » pour ce match.</b><br>Essaie une autre catégorie.</div></div>`;
   return `<article class="mblock" data-p="${state.category}">
     <div class="mb-top"><span class="m-comp">${esc(match.comp)}</span>${badge}<span class="m-time">${state.dayOffset?'Demain':'Auj.'} · ${match.time}</span></div>
     <div class="mb-teams">${teams}</div>${analysisHtml}${trioHtml}
-    <div class="sect-lab" style="margin:14px 14px 6px">Tous les paris du match</div>
-    <div style="padding:0 14px">${tabsHtml}</div>
     ${picksHtml}</article>`;
 }
 function enc(o){return encodeURIComponent(JSON.stringify(o));}
@@ -729,8 +713,7 @@ async function analyzeCustom(o,idea,heur){
 
 /* ===== ANALYSE PAR PARI (sheet) + refresh ===== */
 document.addEventListener('click',e=>{
-  const ml=e.target.closest('[data-matchkey]');if(ml){state.matchKey=ml.dataset.matchkey;state.marketType='all';show('matchview');renderMatchDetail();return;}
-  const mt=e.target.closest('[data-mtype]');if(mt){state.marketType=mt.dataset.mtype;renderMatchDetail();return;}
+  const ml=e.target.closest('[data-matchkey]');if(ml){state.matchKey=ml.dataset.matchkey;show('matchview');renderMatchDetail();return;}
   const b=e.target.closest('[data-why]');if(b){openWhy(JSON.parse(decodeURIComponent(b.dataset.why)));return;}
   const r=e.target.closest('[data-refresh]');if(r){e.stopPropagation();refreshInfos(r.dataset.refresh,r);}
 });
@@ -753,7 +736,7 @@ function openWhy(p){
     });
   };
 }
-function mdToHtml(t){return esc(t).trim().split(/\n{2,}|\n/).filter(Boolean).map(l=>{l=l.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>');return `<p>${l}</p>`;}).join('');}
+function mdToHtml(t){return esc(t).trim().split(/\n{2,}/).filter(Boolean).map(l=>{l=l.replace(/\n/g,' ').replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>');return `<p>${l}</p>`;}).join('');}
 
 /* ===== BUDGET IA (jauge partagée) ===== */
 function refreshBudgetUI(j){
@@ -777,7 +760,7 @@ async function callAI(body){
 }
 async function askClaude(p,pct){
   const dayTxt=p.day?'demain':"aujourd'hui";const sportTxt=state.sport==='tennis'?'tennis':'football';
-  const sys=`Tu es un analyste paris sportifs honnête, façon trader/quant. Jamais "va passer"/"sûr"/"garanti". Ancre sur la proba implicite fournie. Explique précisément CE pari (ce marché, cette sélection) avec des chiffres concrets (stats, forme), pas le match en général. Donne le risque principal. Français, sobre, 100-140 mots, sans titres ni emoji.`;
+  const sys=`Tu es un analyste paris sportifs honnête, façon trader/quant. Jamais "va passer"/"sûr"/"garanti". Ancre sur la proba implicite fournie. Explique précisément CE pari (ce marché, cette sélection) avec des chiffres concrets (stats, forme), pas le match en général. Donne le risque principal. Français, 100-150 mots, 2-3 paragraphes courts et fluides (pas de liste à puces), tu peux utiliser 2-3 emojis sobres pour ponctuer (ex: 📊 pour une stat, ⚠️ pour le risque) sans en abuser, pas de titres en gras.`;
   const user=`${sportTxt}, ${p.comp}, ${dayTxt} : ${p.home} contre ${p.away}. Sélection : "${p.sel}" (${p.market}), cote ≈ ${p.odd.toFixed(2)}, ~${pct} % implicite. Pourquoi spécifiquement CE pari se tient, avec des chiffres concrets et son risque (recherche web). Termine en rappelant que ces ~${pct} % sont l'avis du marché.`;
   const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}]});
   const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
