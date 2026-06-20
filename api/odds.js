@@ -107,11 +107,16 @@ export default async function handler(req, res) {
 
   const result = {};
   for (const { key, comp } of targets) {
-    const marketsParam = isTennis ? "h2h,totals" : "h2h,totals,btts,double_chance,draw_no_bet";
-    const url = `https://api.the-odds-api.com/v4/sports/${key}/odds`
-      + `?apiKey=${apiKey}&regions=fr&markets=${marketsParam}&oddsFormat=decimal&dateFormat=iso`;
+    const fullParam = isTennis ? "h2h,totals" : "h2h,totals,btts,double_chance,draw_no_bet";
+    const baseUrl = `https://api.the-odds-api.com/v4/sports/${key}/odds`
+      + `?apiKey=${apiKey}&regions=fr&oddsFormat=decimal&dateFormat=iso&markets=`;
     try {
-      const r = await fetch(url);
+      let r = await fetch(baseUrl + fullParam);
+      if (!r.ok && fullParam !== "h2h,totals") {
+        // un des marchés additionnels n'est probablement pas accepté pour ce sport/cette région :
+        // on retente avec uniquement les 2 marchés de base, pour ne jamais perdre l'affichage.
+        r = await fetch(baseUrl + "h2h,totals");
+      }
       if (!r.ok) continue;                 // compétition hors-saison / non couverte : on saute
       const events = await r.json();
       const matches = [];
