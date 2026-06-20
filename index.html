@@ -4,6 +4,12 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Aléa · paris en probabilités</title>
+<link rel="icon" href="/logo.png" />
+<link rel="apple-touch-icon" href="/logo.png" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-title" content="Aléa" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="theme-color" content="#0F1218" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet" />
@@ -124,6 +130,11 @@
   .catbtn .cn{font-family:var(--disp);font-weight:700;font-size:16px;display:flex;align-items:center;justify-content:center;gap:7px} .catbtn .cd{width:8px;height:8px;border-radius:50%;background:var(--c)} .catbtn .cb{font-family:var(--mono);font-size:9.5px;color:var(--txt-mut);margin-top:4px}
   .catbtn[data-cat="sage"]{--c:var(--sage)} .catbtn[data-cat="normal"]{--c:var(--normal)} .catbtn[data-cat="fun"]{--c:var(--fun)}
   .catnote{font-size:12.5px;color:var(--txt-mut);margin:13px 2px 2px;line-height:1.5}
+  .cats.dimmed{opacity:.4;pointer-events:none;transition:opacity .15s}
+  .mtabs{display:flex;gap:7px;overflow-x:auto;padding:0 0 4px;-webkit-overflow-scrolling:touch}
+  .mtabs::-webkit-scrollbar{height:4px}.mtabs::-webkit-scrollbar-thumb{background:var(--line);border-radius:9px}
+  .mtab{flex:0 0 auto;font-family:var(--disp);font-weight:600;font-size:12.5px;color:var(--txt-mut);background:var(--ink-2);border:1px solid var(--line);border-radius:999px;padding:7px 13px;white-space:nowrap}
+  .mtab[aria-pressed="true"]{background:var(--accent);color:var(--ink);border-color:var(--accent)}
   .list{padding:8px 0 0;display:flex;flex-direction:column;gap:14px}
 
   /* MATCH CARD */
@@ -192,6 +203,9 @@
   .stat .sl{font-family:var(--mono);font-size:9px;letter-spacing:.05em;text-transform:uppercase;color:var(--txt-dim)} .stat .sv{font-family:var(--mono);font-weight:700;font-size:15px;margin-top:3px}
   .dbody p{margin:0 0 11px;color:var(--txt)} .dbody p strong{color:#fff}
   .ai-badge{display:inline-flex;align-items:center;gap:6px;font-family:var(--mono);font-size:10px;letter-spacing:.05em;text-transform:uppercase;color:var(--sage);margin-bottom:8px} .ai-badge.loading{color:var(--txt-dim)}
+  .ai-trigger{margin:2px 0 14px;width:100%;display:flex;align-items:center;justify-content:center;gap:8px;font-family:var(--disp);font-weight:600;font-size:13px;color:var(--accent,var(--gold));background:color-mix(in srgb,var(--accent,var(--gold)) 9%,var(--ink-2));border:1px solid var(--line);border-radius:10px;padding:11px;cursor:pointer}
+  .ai-trigger:hover{border-color:var(--accent,var(--gold))}
+  .ai-trigger:disabled{opacity:.7;cursor:wait}
   .dots{display:inline-flex;gap:4px}.dots i{width:5px;height:5px;border-radius:50%;background:currentColor;animation:blink 1.1s infinite} .dots i:nth-child(2){animation-delay:.18s}.dots i:nth-child(3){animation-delay:.36s}
   @keyframes blink{0%,80%,100%{opacity:.25}40%{opacity:1}}
   .disclaim{margin-top:6px;padding:11px 12px;border:1px solid var(--line-soft);border-radius:9px;background:var(--ink);font-size:12px;color:var(--txt-mut);line-height:1.5} .disclaim b{color:var(--txt)}
@@ -274,7 +288,7 @@
   <section class="matchview" id="matchView" hidden>
     <button class="change" id="backToList">← tous les matchs</button>
     <div class="sect-lab" style="margin-top:16px">Choisis ta catégorie</div>
-    <div class="cats">
+    <div class="cats" id="catsBox">
       <button class="catbtn" data-cat="sage" aria-pressed="true"><span class="cn"><span class="cd"></span>Safe</span><span class="cb">proba ≥ 62 %</span></button>
       <button class="catbtn" data-cat="normal" aria-pressed="false"><span class="cn"><span class="cd"></span>Équilibré</span><span class="cb">idéal montante</span></button>
       <button class="catbtn" data-cat="fun" aria-pressed="false"><span class="cn"><span class="cd"></span>Fun bet</span><span class="cb">≤ 33 %</span></button>
@@ -322,7 +336,7 @@ const DEMO={
    { home:"États-Unis", away:"Australie", time:"21:00", date:'2026-06-19',
      ctx:"USA a survolé son entrée (4 buts face au Paraguay) ; l'Australie a surpris la Turquie 2-0. Pulisic incertain (mollet).",
      analysis:{forces:"USA : attaque en feu sous Pochettino, pressing haut, profondeur (Balogun, Weah). Australie : bloc compact, danger en transition.",dynamique:"Les deux sortent d'une victoire ; USA porté par l'élan offensif.",stats:"USA : 2,4 buts/match marqués sur la campagne, 1,0 concédé. Australie : 1,1 marqué, 0,6 concédé.",absences:"Pulisic incertain (mollet, entraînement en solo) — impact majeur sur la création US.",enjeux:"USA vise la 1re place du groupe D à domicile ; l'Australie peut se contenter d'un point."},
-     notes:{"F. Balogun ou C. Pulisic marque":"Balogun (cible buteur du marché, ~+155) et Pulisic sont les deux principales menaces offensives US : avec le volume créé par l'équipe (2,4 buts/match), l'un des deux trouve souvent le chemin des filets.","C. Pulisic buteur ou passeur":"Pulisic est le danger n°1 américain quand il joue, mais sa titularisation n'est pas garantie (mollet) — le risque majeur de ce pari."},
+     notes:{"F. Balogun ou C. Pulisic marque":"Balogun a marqué dans 3 de ses 5 derniers matchs avec l'équipe nationale (5 buts) ; Pulisic, lui, a été décisif (but ou passe) sur 4 de ses 6 dernières sorties. Avec deux profils buteurs réguliers dans le onze, l'un des deux trouve souvent le but — peu importe la défense en face.","C. Pulisic buteur ou passeur":"Pulisic est décisif (but ou passe) sur 4 de ses 6 derniers matchs avec les USA, un rythme élevé pour un ailier. Le seul vrai risque ici n'est pas l'adversaire mais sa condition physique : sa titularisation n'est pas garantie (mollet)."},
      stats:{homeForm:"victoire 4-1 face au Paraguay, 2e succès de rang à domicile",awayForm:"victoire 2-0 face à la Turquie, 1 seul but encaissé sur ses 2 derniers matchs",homeAvgFor:2.4,homeAvgAgainst:1.0,awayAvgFor:1.1,awayAvgAgainst:0.6,bttsHome:60,bttsAway:35,over25:62,h2h:"Aucune confrontation officielle récente entre les deux sélections."},
      markets:[
       {type:"Résultat du match (1N2)", sels:["États-Unis","Match nul","Australie"], odds:[1.61,4.30,5.50]},
@@ -347,7 +361,7 @@ const DEMO={
    { home:"Brésil", away:"Haïti", time:"02:30", date:'2026-06-20',
      ctx:"Le Brésil archi-favori : écart de niveau énorme avec Haïti, nouvelle génération (Endrick, Vinícius).",
      analysis:{forces:"Brésil : densité technique exceptionnelle, attaque pléthorique. Haïti : courage, bloc bas, largement inférieur.",dynamique:"Brésil lancé ; Haïti en difficulté face aux grosses nations.",stats:"Brésil : 2,8 buts/match marqués, 0,6 concédé. Haïti : 0,4 marqué, 2,6 concédé.",absences:"Rotation possible côté Brésil (gestion en poule).",enjeux:"Brésil gère sa qualif ; Haïti joue l'honneur."},
-     notes:{"Vinícius Jr ou Endrick marque":"Les deux stars offensives brésiliennes face à une défense qui devrait largement subir : gros volume de tirs cumulé attendu, l'un des deux trouve souvent le but."},
+     notes:{"Vinícius Jr ou Endrick marque":"Vinícius a marqué dans 4 de ses 6 derniers matchs en sélection ; Endrick, plus jeune, a quand même trouvé le but dans 2 de ses 4 dernières apparitions. Ce qui compte ici, c'est leur propre rythme de buteur récent — pas la solidité de la défense haïtienne, qui n'entre pas vraiment en jeu face à deux profils aussi prolifiques."},
      stats:{homeForm:"plus de 2 buts marqués dans 7 de ses 8 derniers matchs officiels",awayForm:"0 clean sheet lors de ses 4 dernières sorties officielles face à des nations classées",homeAvgFor:2.8,homeAvgAgainst:0.6,awayAvgFor:0.4,awayAvgAgainst:2.6,bttsHome:38,bttsAway:20,over25:75,h2h:"Pas de précédent direct à ce niveau de compétition."},
      markets:[
       {type:"Résultat du match (1N2)", sels:["Brésil","Match nul","Haïti"], odds:[1.10,9.00,21.0]},
@@ -368,7 +382,7 @@ const DEMO={
       {type:"Buteur à tout moment", sels:["Maroc marque","Maroc ne marque pas"], odds:[1.40,2.90]},
      ]},
    { home:"Allemagne", away:"Côte d'Ivoire", time:"22:00", date:'2026-06-20', ctx:"L'Allemagne large favorite (Wirtz, Musiala) ; la Côte d'Ivoire, championne d'Afrique, a des arguments athlétiques.",
-     notes:{"F. Wirtz ou J. Musiala décisif":"Le duo créatif allemand (but ou passe décisive) : très impliqué dans la construction offensive, l'un des deux pèse presque toujours sur les buts de la Mannschaft."},
+     notes:{"F. Wirtz ou J. Musiala décisif":"Wirtz est décisif (but ou passe) sur 5 de ses 7 derniers matchs avec l'Allemagne ; Musiala l'est sur 4 de ses 6 dernières sorties. C'est cette fréquence individuelle qui justifie le pari, bien plus que le niveau de la défense ivoirienne en face."},
      stats:{homeForm:"milieu créatif performant (Wirtz, Musiala), gros volume de tirs cadrés",awayForm:"solides athlétiquement mais moins prolifiques face aux grosses nations",homeAvgFor:2.2,homeAvgAgainst:0.8,awayAvgFor:1.2,awayAvgAgainst:1.3,bttsHome:42,bttsAway:35,over25:55,h2h:"Pas de confrontation récente recensée."},
      markets:[
       {type:"Résultat du match (1N2)", sels:["Allemagne","Match nul","Côte d'Ivoire"], odds:[1.50,4.20,6.50]},
@@ -379,7 +393,7 @@ const DEMO={
       {type:"Les deux équipes marquent (BTTS)", sels:["Les 2 équipes marquent","Pas les deux"], odds:[2.05,1.70]},
      ]},
    { home:"Pays-Bas", away:"Suède", time:"19:00", date:'2026-06-20', ctx:"Les Pays-Bas favoris (effectif dense) ; la Suède, outsider physique, dangereuse sur coups de pied arrêtés.",
-     notes:{"M. Depay ou C. Gakpo marque":"Les Pays-Bas alignent deux solutions offensives complémentaires : à eux deux, l'un des deux trouve le but dans la majorité des matchs où l'équipe domine."},
+     notes:{"M. Depay ou C. Gakpo marque":"Depay a marqué dans 3 de ses 5 derniers matchs en sélection ; Gakpo, plus irrégulier, l'a fait dans 2 de ses 5 dernières sorties. C'est leur registre personnel de buteur qui pèse ici, pas la qualité défensive de la Suède en face."},
      stats:{homeForm:"large effectif offensif, plusieurs solutions devant (Depay, Gakpo)",awayForm:"bloc compact, dangereux sur coups de pied arrêtés",homeAvgFor:1.9,homeAvgAgainst:0.9,awayAvgFor:1.0,awayAvgAgainst:1.1,bttsHome:48,bttsAway:38,over25:50,h2h:"Confrontations rares en compétition officielle récente."},
      markets:[
       {type:"Résultat du match (1N2)", sels:["Pays-Bas","Match nul","Suède"], odds:[1.70,3.70,5.00]},
@@ -418,7 +432,7 @@ const DEMO={
 const CONFIG={ SAGE_MIN:0.62, NORMAL_LOW:0.40, FUN_MAX:0.33, MAX_PICKS:6,
   ODDS_ENDPOINT:'/api/odds',
   WHY_ENDPOINT:(location.hostname.endsWith('vercel.app')||location.hostname.endsWith('.now.sh'))?'/api/why':'https://api.anthropic.com/v1/messages' };
-const state={ sport:null, dayOffset:0, category:'sage', live:false, matchKey:null };
+const state={ sport:null, dayOffset:0, category:'sage', live:false, matchKey:null, marketType:'all' };
 let prof={ firstName:'', username:'', favs:[] };
 
 function loadProf(){try{const r=Store.get('alea_profile');if(r){const p=JSON.parse(r);prof.firstName=p.firstName||'';prof.username=p.username||'';prof.favs=Array.isArray(p.favs)?p.favs:[];}}catch(e){}}
@@ -461,7 +475,7 @@ function setSource(live){state.live=live;}
 
 const VIEWMAP={profile:'profileView',home:'intro',prefs:'prefsView',custom:'customView',board:'board',matchview:'matchView'};
 function show(view){document.body.dataset.view=view;Object.values(VIEWMAP).forEach(id=>$(id).hidden=true);$(VIEWMAP[view]).hidden=false;window.scrollTo({top:0,behavior:'smooth'});}
-function refreshHome(){if(prof.firstName){$('hiName').hidden=false;$('hiName').textContent='Bienvenue '+prof.firstName+' 👋';}else{$('hiName').hidden=true;}$('prefCta').style.display=hasPrefs()?'none':'flex';}
+function refreshHome(){if(prof.firstName){$('hiName').hidden=false;$('hiName').innerHTML='Bienvenue '+esc(prof.firstName)+' 👋'+(prof.username?` <span style="color:var(--txt-dim);font-weight:500;font-size:13px">· @${esc(prof.username)}</span>`:'');}else{$('hiName').hidden=true;}$('prefCta').style.display=hasPrefs()?'none':'flex';}
 
 let lastMatchByKey={};
 async function renderBoard(){
@@ -482,24 +496,30 @@ async function renderBoard(){
     </button>`;
   }).join('');
 }
-function buildPicksForMatch(match,category){
+function marketTypesFor(match){const seen=new Set();const order=[];for(const mk of match.markets){if(!seen.has(mk.type)){seen.add(mk.type);order.push(mk.type);}}return order;}
+function buildPicksForMatch(match,category,marketType){
   const favSet=new Set(prof.favs);const meta=metaFor(match);const cands=[];
-  for(const mk of match.markets){const pr=probsFor(mk);
+  const byCat=!marketType||marketType==='all';
+  for(const mk of match.markets){
+    if(marketType&&marketType!=='all'&&mk.type!==marketType)continue;
+    const pr=probsFor(mk);
     for(let i=0;i<mk.sels.length;i++){if(isNegativeSel(mk.sels[i]))continue;const p=pr[i];
-      const ok=category==='sage'?p>=CONFIG.SAGE_MIN:category==='normal'?(p>=CONFIG.NORMAL_LOW&&p<CONFIG.SAGE_MIN):(p<=CONFIG.FUN_MAX&&p>=0.04);
-      if(!ok)continue;
+      if(byCat){const ok=category==='sage'?p>=CONFIG.SAGE_MIN:category==='normal'?(p>=CONFIG.NORMAL_LOW&&p<CONFIG.SAGE_MIN):(p<=CONFIG.FUN_MAX&&p>=0.04);if(!ok)continue;}
       const note=(match.notes&&match.notes[mk.sels[i]])||'';
       cands.push({comp:match.comp,home:match.home,away:match.away,time:match.time,sel:mk.sels[i],market:mk.type,odd:mk.odds[i],prob:p,raw:!!mk.raw,fav:favSet.has(mk.type),note,meta,stats:match.stats||null});
     }}
-  cands.sort((a,b)=>{if(a.fav!==b.fav)return a.fav?-1:1;return category==='fun'?b.odd-a.odd:b.prob-a.prob;});
+  cands.sort((a,b)=>{if(a.fav!==b.fav)return a.fav?-1:1;return (byCat&&category==='fun')?b.odd-a.odd:b.prob-a.prob;});
   return cands.slice(0,CONFIG.MAX_PICKS);
 }
 function renderMatchDetail(){
   const match=lastMatchByKey[state.matchKey];
   if(!match){show('board');return;}
+  const types=marketTypesFor(match);
+  if(!state.marketType||(state.marketType!=='all'&&!types.includes(state.marketType)))state.marketType='all';
   document.querySelectorAll('#matchView .catbtn').forEach(x=>x.setAttribute('aria-pressed',String(x.dataset.cat===state.category)));
-  const picks=buildPicksForMatch(match,state.category);
-  $('catNote').textContent=catNoteText(picks.length);
+  $('catsBox').classList.toggle('dimmed',state.marketType!=='all');
+  const picks=buildPicksForMatch(match,state.category,state.marketType);
+  $('catNote').textContent=state.marketType==='all'?catNoteText(picks.length):`${picks.length} option${picks.length>1?'s':''} pour ce marché`;
   $('mvList').innerHTML=matchBlock(picks,match);
   requestAnimationFrame(()=>{document.querySelectorAll('#mvList .prow-bar i').forEach(f=>f.style.width=f.dataset.w+'%');});
 }
@@ -511,12 +531,18 @@ function matchBlock(items,match){
   const analysisHtml=`<div class="analysis"><div class="an-head"><span class="t">Analyse générale du match</span><button class="refresh" data-refresh="${esc(match.home+'|'+match.away)}">↻ Dernières infos</button></div><div class="an-body">${rows.map(r=>`<div class="an-row"><span class="k">${esc(r[0])}</span><span class="v">${esc(r[1])}</span></div>`).join('')}</div></div>`;
   const trio=smartTrio(match);
   const trioHtml=trio.length?`<div class="smart"><div class="sl">⚡ Pari intelligent</div><div class="smart-row">${trio.map((t,i)=>{const pl=enc({sport:state.sport,comp:match.comp,home:match.home,away:match.away,time:match.time,day:state.dayOffset,sel:t.sel,market:t.market,odd:t.odd,prob:t.prob,raw:t.raw,meta:t.meta,stats:t.stats});return `<button class="sbet s${i+1}" data-why="${pl}"><span class="st">${t.kind}</span><span class="ss">${esc(t.sel)}</span><span class="so">≈${t.odd.toFixed(2)}</span></button>`;}).join('')}</div></div>`:'';
+  const types=marketTypesFor(match);
+  const activeType=(state.marketType&&(state.marketType==='all'||types.includes(state.marketType)))?state.marketType:'all';
+  const tabsHtml=`<div class="mtabs"><button class="mtab" data-mtype="all" aria-pressed="${activeType==='all'}">Tous</button>${types.map(t=>`<button class="mtab" data-mtype="${esc(t)}" aria-pressed="${activeType===t}">${esc(t)}</button>`).join('')}</div>`;
+  const picksLabel=activeType==='all'?`Paris conseillés · « ${catLabel()} »`:esc(activeType);
   const picksHtml=items.length
-    ? `<div class="picks"><div class="pl">Paris conseillés · « ${catLabel()} »</div>${items.map(pickRow).join('')}</div>`
-    : `<div class="picks"><div class="empty" style="margin-top:2px"><b>Rien dans « ${catLabel()} » pour ce match.</b><br>Essaie une autre catégorie.</div></div>`;
+    ? `<div class="picks"><div class="pl">${picksLabel}</div>${items.map(pickRow).join('')}</div>`
+    : `<div class="picks"><div class="empty" style="margin-top:2px"><b>Rien ${activeType==='all'?`dans « ${catLabel()} »`:'ici'} pour ce match.</b><br>${activeType==='all'?'Essaie une autre catégorie.':'Essaie un autre type de pari.'}</div></div>`;
   return `<article class="mblock" data-p="${state.category}">
     <div class="mb-top"><span class="m-comp">${esc(match.comp)}</span>${badge}<span class="m-time">${state.dayOffset?'Demain':'Auj.'} · ${match.time}</span></div>
     <div class="mb-teams">${teams}</div>${analysisHtml}${trioHtml}
+    <div class="sect-lab" style="margin:14px 14px 6px">Tous les paris du match</div>
+    <div style="padding:0 14px">${tabsHtml}</div>
     ${picksHtml}</article>`;
 }
 function enc(o){return encodeURIComponent(JSON.stringify(o));}
@@ -603,9 +629,9 @@ function reasonFor(p){
   if(m==="Buteur à tout moment"){
     if(/ne marque pas|non décisif/i.test(s))return `Pari inverse : ${s.replace(/ ne marque pas| non décisif/i,'')} reste muet (${pct} %).`;
     const who=s.replace(/ marque| buteur ou passeur/i,'');
-    return `${who} marque s'il a le volume offensif et la finition : dépend de sa titularisation, son rôle, ses tirs cadrés récents${st?` et de la moyenne offensive de son équipe (${st.homeAvgFor>=st.awayAvgFor?st.homeAvgFor:st.awayAvgFor} but/match)`:''}. Marché : ${pct} %.`;
+    return `Ce qui compte ici, c'est l'historique de ${who} lui-même : sa fréquence de buts sur ses derniers matchs, sa position dans l'équipe (axe vs côté) et sa probable titularisation — pas la solidité de la défense en face. Marché : ${pct} %.`;
   }
-  if(m==="Premier buteur du match"||m==="Dernier buteur du match")return `Marché très ouvert (beaucoup de candidats) d'où la grosse cote. ${s} est crédible comme ${m.indexOf("Premier")===0?'premier':'dernier'} buteur s'il attaque côté favori, mais ça reste une loterie (${pct} %).`;
+  if(m==="Premier buteur du match"||m==="Dernier buteur du match")return `Marché très ouvert (beaucoup de candidats), d'où la grosse cote. Ce qui rend ${s} crédible, c'est son propre profil de buteur récent (régularité, rôle dans le système) — pas le niveau de la défense adverse. Reste une loterie par nature (${pct} %).`;
   if(m==="Équipe qui ouvre le score"){if(/Aucun/i.test(s))return `Parier le 0-0 : rare, surtout avec ${fav} en attaque (${pct} %).`;return `${s.replace(/ ouvre le score/i,'')} marque en premier — souvent le favori qui met la pression d'entrée (${pct} %).`;}
   if(m.indexOf("Nombre de buts de l'équipe")===0){
     if(st) return `Sur la seule production offensive de cette équipe (${pct} %) : moyenne de ${st.homeAvgFor} but/match marqués, face à une défense adverse qui concède ${st.awayAvgAgainst}/match.`;
@@ -620,7 +646,11 @@ function reasonFor(p){
   /* 8) AUTRES */
   if(m.indexOf("Qualification")===0)return `Sur la qualification globale, pas ce seul match (prolongation/tirs au but inclus) — ${pct} %.`;
   if(m==="Nombre total de corners")return `Lié à la domination de ${fav} et au style de jeu plus qu'au score (${pct} %).`;
-  if(m==="Nombre total de cartons"||m==="Joueur averti (carton jaune)"||m==="Joueur expulsé (carton rouge)")return `Dépend de l'arbitrage, de l'intensité et de l'enjeu. ${/expulsé/i.test(m)?'Un rouge reste rare':'Les profils rugueux sont les plus exposés'} (${pct} %).`;
+  if(m==="Nombre total de cartons")return `Lié à l'intensité du match et au profil de l'arbitre plus qu'au score (${pct} %).`;
+  if(m==="Joueur averti (carton jaune)"||m==="Joueur expulsé (carton rouge)"){
+    const who=s.replace(/ averti| expulsé/i,'');
+    return `Ce qui compte ici, c'est le profil disciplinaire de ${who} lui-même : son poste (un milieu récupérateur ou un défenseur prend plus de cartons qu'un attaquant), son historique personnel d'avertissements et l'enjeu du match pour lui — pas l'intensité générale de la rencontre. ${/expulsé/i.test(m)?'Un rouge reste de toute façon un événement rare. ':''}Marché : ${pct} %.`;
+  }
   if(m==="Total jeux"||m==="Nombre de sets"||m==="Handicap jeux"){
     if(st)return `Sur le format de la rencontre (${pct} %) : ${fav} — ${st.homeForm}. ${dog} — ${st.awayForm}. ${st.h2h}`;
     return `Sur le format de la rencontre : dépend de l'écart de niveau et de la tenue de service sur gazon (${pct} %).`;
@@ -699,7 +729,8 @@ async function analyzeCustom(o,idea,heur){
 
 /* ===== ANALYSE PAR PARI (sheet) + refresh ===== */
 document.addEventListener('click',e=>{
-  const ml=e.target.closest('[data-matchkey]');if(ml){state.matchKey=ml.dataset.matchkey;show('matchview');renderMatchDetail();return;}
+  const ml=e.target.closest('[data-matchkey]');if(ml){state.matchKey=ml.dataset.matchkey;state.marketType='all';show('matchview');renderMatchDetail();return;}
+  const mt=e.target.closest('[data-mtype]');if(mt){state.marketType=mt.dataset.mtype;renderMatchDetail();return;}
   const b=e.target.closest('[data-why]');if(b){openWhy(JSON.parse(decodeURIComponent(b.dataset.why)));return;}
   const r=e.target.closest('[data-refresh]');if(r){e.stopPropagation();refreshInfos(r.dataset.refresh,r);}
 });
@@ -709,13 +740,18 @@ function openWhy(p){
   drawer.style.setProperty('--accent',`var(--${state.category})`);
   $('dwTitle').textContent=`${p.home} ${state.sport==='tennis'?'vs':'–'} ${p.away}`;$('dwTag').textContent=p.sel;
   const pct=Math.round(p.prob*100);const body=$('dwBody');const reason=p.note?p.note:reasonFor(p);
-  body.innerHTML=statBlock(p,pct)+`<p>${esc(reason)}</p>`+`<div class="ai-badge loading" id="aiBadge"><span class="dots"><i></i><i></i><i></i></span> analyse IA détaillée…</div>`+disclaimer(pct);
+  body.innerHTML=statBlock(p,pct)+`<p>${esc(reason)}</p>`+`<button class="ai-trigger" id="aiTriggerBtn">✦ Voir l'analyse IA détaillée</button>`+disclaimer(pct);
   drawer.classList.add('open');scrim.classList.add('open');drawer.setAttribute('aria-hidden','false');
-  askClaude(p,pct).then(t=>{if(t){body.innerHTML=statBlock(p,pct)+`<div class="ai-badge">✦ analyse détaillée</div>`+mdToHtml(t)+disclaimer(pct);}else{const b=$('aiBadge');if(b)b.remove();}}).catch(err=>{
-    const b=$('aiBadge');if(!b)return;
-    if(err&&err.budget){b.outerHTML=`<div class="ai-badge" style="color:var(--fun)">⚠ budget IA du mois atteint (${err.spent.toFixed(2)} $ / ${err.cap} $) — explication gratuite ci-dessus uniquement</div>`;}
-    else b.remove();
-  });
+  const btn=$('aiTriggerBtn');
+  if(btn) btn.onclick=()=>{
+    btn.disabled=true;btn.innerHTML=`<span class="dots"><i></i><i></i><i></i></span> analyse en cours…`;
+    askClaude(p,pct).then(t=>{
+      if(t){btn.outerHTML=`<div class="ai-badge">✦ analyse détaillée</div>`+mdToHtml(t);}else{btn.remove();}
+    }).catch(err=>{
+      if(err&&err.budget){btn.outerHTML=`<div class="ai-badge" style="color:var(--fun)">⚠ budget IA du mois atteint (${err.spent.toFixed(2)} $ / ${err.cap} $) — explication gratuite ci-dessus uniquement</div>`;}
+      else{btn.remove();}
+    });
+  };
 }
 function mdToHtml(t){return esc(t).trim().split(/\n{2,}|\n/).filter(Boolean).map(l=>{l=l.replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>').replace(/\*(.+?)\*/g,'<em>$1</em>');return `<p>${l}</p>`;}).join('');}
 
