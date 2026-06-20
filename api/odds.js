@@ -1,6 +1,12 @@
 // api/odds.js — Proxy The Odds API (région "fr"), pour Vercel (Node serverless).
 // Cache la clé (env THE_ODDS_API_KEY) et règle le CORS.
 // Renvoie : { "Nom compétition": [ {home,away,time,offset,markets:[{type,sels,odds}]} ] }
+//
+// ⚠️ Le foot demande maintenant 5 marchés (h2h,totals,btts,double_chance,draw_no_bet) au lieu de 2 :
+// ça coûte ~2,5x plus de crédits par appel chez The Odds API. Le cache de 2 min (en bas du fichier)
+// limite la casse, mais surveille ta conso sur the-odds-api.com si tu approches le palier gratuit.
+// Les marchés joueurs (buteur...) ne sont eux PAS disponibles pour la Coupe du Monde, quel que soit
+// l'effort mis ici — réservés à EPL/Ligue 1/Bundesliga/Serie A/Liga/MLS, et via bookmakers US.
 
 // Mappe le "sport" de l'app -> clés The Odds API + nom d'affichage de la compétition.
 // Ajoute/retire des clés selon ce que tu veux suivre (chaque clé = des crédits).
@@ -67,6 +73,23 @@ function buildMarkets(ev, isTennis) {
         sels: [`+${pt} ${unit}`, `-${pt} ${unit}`], odds: [over.price, under.price] });
     }
   }
+
+  // Marchés additionnels foot uniquement (non couverts pour la Coupe du Monde dans tous les cas
+  // pour les marchés joueurs, mais BTTS/double chance sont des marchés "équipe", donc disponibles).
+  if (!isTennis) {
+    const btts = bk.markets?.find(m => m.key === "btts");
+    if (btts && btts.outcomes?.length === 2) {
+      out.push({ type: "Les deux équipes marquent (BTTS)", sels: btts.outcomes.map(o => o.name), odds: btts.outcomes.map(o => o.price) });
+    }
+    const dc = bk.markets?.find(m => m.key === "double_chance");
+    if (dc && dc.outcomes?.length === 3) {
+      out.push({ type: "Double chance", sels: dc.outcomes.map(o => o.name), odds: dc.outcomes.map(o => o.price), raw: true });
+    }
+    const dnb = bk.markets?.find(m => m.key === "draw_no_bet");
+    if (dnb && dnb.outcomes?.length === 2) {
+      out.push({ type: "Pari remboursé si match nul (Draw No Bet)", sels: dnb.outcomes.map(o => o.name), odds: dnb.outcomes.map(o => o.price) });
+    }
+  }
   return out;
 }
 
@@ -84,8 +107,9 @@ export default async function handler(req, res) {
 
   const result = {};
   for (const { key, comp } of targets) {
+    const marketsParam = isTennis ? "h2h,totals" : "h2h,totals,btts,double_chance,draw_no_bet";
     const url = `https://api.the-odds-api.com/v4/sports/${key}/odds`
-      + `?apiKey=${apiKey}&regions=fr&markets=h2h,totals&oddsFormat=decimal&dateFormat=iso`;
+      + `?apiKey=${apiKey}&regions=fr&markets=${marketsParam}&oddsFormat=decimal&dateFormat=iso`;
     try {
       const r = await fetch(url);
       if (!r.ok) continue;                 // compétition hors-saison / non couverte : on saute
