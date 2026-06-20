@@ -9,18 +9,32 @@
 // l'effort mis ici — réservés à EPL/Ligue 1/Bundesliga/Serie A/Liga/MLS, et via bookmakers US.
 
 // Mappe le "sport" de l'app -> clés The Odds API + nom d'affichage de la compétition.
-// Ajoute/retire des clés selon ce que tu veux suivre (chaque clé = des crédits).
+// Le foot reste en dur (les championnats/compétitions ne changent pas de clé en cours de saison).
+// Le tennis, lui, change de tournoi CHAQUE SEMAINE (clé différente à chaque fois) : au lieu de
+// deviner/figer un tournoi qui devient vite obsolète, on demande à l'API quels tournois ATP sont
+// actuellement en cours (voir discoverTennisTargets ci-dessous) — ça s'adapte tout seul, sans
+// jamais avoir besoin de retoucher ce fichier semaine après semaine.
 const SPORTS = {
   foot: [
     { key: "soccer_fifa_world_cup",   comp: "Coupe du Monde 2026" },
     { key: "soccer_france_ligue_one", comp: "Ligue 1" },
     { key: "soccer_uefa_champs_league", comp: "Ligue des Champions" },
   ],
-  tennis: [
-    { key: "tennis_atp_french_open", comp: "Roland-Garros" },
-    { key: "tennis_atp_wimbledon",   comp: "Wimbledon" },
-  ],
 };
+
+// Liste les tournois ATP "en saison" en ce moment via l'endpoint /sports (gratuit, ne coûte
+// aucun crédit). On garde au plus 4 tournois pour limiter le nombre d'appels ensuite.
+async function discoverTennisTargets(apiKey) {
+  try {
+    const r = await fetch(`https://api.the-odds-api.com/v4/sports/?apiKey=${apiKey}`);
+    if (!r.ok) return [];
+    const sports = await r.json();
+    return sports
+      .filter(s => s.key && s.key.startsWith("tennis_atp_") && s.active)
+      .slice(0, 4)
+      .map(s => ({ key: s.key, comp: s.title || s.key }));
+  } catch (_) { return []; }
+}
 
 // Décale une date ISO (UTC) vers la date "calendaire" à Paris (YYYY-MM-DD)
 function parisDateKey(iso) {
@@ -101,7 +115,7 @@ export default async function handler(req, res) {
   const sport = (req.query.sport || "foot").toString();
   const day = Number(req.query.day || 0); // 0 = aujourd'hui, 1 = demain
   const isTennis = sport === "tennis";
-  const targets = SPORTS[sport] || [];
+  const targets = isTennis ? await discoverTennisTargets(apiKey) : (SPORTS[sport] || []);
   const { t0, t1 } = todayKeys();
   const wantKey = day === 1 ? t1 : t0;
 
