@@ -31,7 +31,7 @@
 
   .logo-mark{width:30px;height:30px;border-radius:9px;background:var(--logo) center/cover no-repeat;flex:none;box-shadow:inset 0 0 0 1px rgba(255,255,255,.08)}
 
-  header.top{position:sticky;top:0;z-index:30;background:rgba(15,18,24,.82);backdrop-filter:blur(12px);border-bottom:1px solid var(--line-soft)}
+  header.top{position:sticky;top:0;z-index:30;background:rgba(15,18,24,.82);backdrop-filter:blur(12px);border-bottom:1px solid var(--line-soft);padding-top:env(safe-area-inset-top)}
   .top-in{max-width:720px;margin:0 auto;padding:12px 16px;display:flex;align-items:center;gap:10px}
   .brand{display:flex;align-items:center;gap:9px;background:none;border:0;color:var(--txt)}
   .brand .wm{font-family:var(--disp);font-weight:700;letter-spacing:.01em;font-size:18px}
@@ -760,7 +760,7 @@ async function callAI(body){
 }
 async function askClaude(p,pct){
   const dayTxt=p.day?'demain':"aujourd'hui";const sportTxt=state.sport==='tennis'?'tennis':'football';
-  const sys=`Tu es un analyste paris sportifs honnête, façon trader/quant. Jamais "va passer"/"sûr"/"garanti". Ancre sur la proba implicite fournie. Explique précisément CE pari (ce marché, cette sélection) avec des chiffres concrets (stats, forme), pas le match en général. Donne le risque principal. Français, 100-150 mots, 2-3 paragraphes courts et fluides (pas de liste à puces), tu peux utiliser 2-3 emojis sobres pour ponctuer (ex: 📊 pour une stat, ⚠️ pour le risque) sans en abuser, pas de titres en gras.`;
+  const sys=`Tu es un analyste paris sportifs honnête, façon trader/quant. Jamais "va passer"/"sûr"/"garanti". Ancre sur la proba implicite fournie. Structure ta réponse en deux temps : d'abord UNE phrase courte qui résume directement pourquoi ce pari se tient (l'essentiel, sans détail) ; puis, dans un second paragraphe, le détail chiffré (stats, forme) qui appuie ce résumé, avec le risque principal à la fin. Explique précisément CE pari (ce marché, cette sélection), pas le match en général. Français, 100-150 mots, 2-3 paragraphes courts et fluides (pas de liste à puces), tu peux utiliser 2-3 emojis sobres pour ponctuer (ex: 📊 pour une stat, ⚠️ pour le risque) sans en abuser, pas de titres en gras.`;
   const user=`${sportTxt}, ${p.comp}, ${dayTxt} : ${p.home} contre ${p.away}. Sélection : "${p.sel}" (${p.market}), cote ≈ ${p.odd.toFixed(2)}, ~${pct} % implicite. Pourquoi spécifiquement CE pari se tient, avec des chiffres concrets et son risque (recherche web). Termine en rappelant que ces ~${pct} % sont l'avis du marché.`;
   const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}]});
   const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
