@@ -96,6 +96,7 @@
   .rc-stat .l{font-family:var(--mono);font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-dim)} .rc-stat .v{font-family:var(--mono);font-weight:700;font-size:18px;margin-top:3px}
   .rc-sec{margin-top:12px} .rc-sec h4{font-family:var(--disp);font-size:13px;font-weight:700;margin-bottom:5px}
   .rc-sec.pour h4{color:var(--sage)} .rc-sec.risk h4{color:var(--fun)}
+  .rc-sec.value{background:color-mix(in srgb,var(--gold) 8%,transparent);border:1px solid color-mix(in srgb,var(--gold) 30%,var(--line));border-radius:10px;padding:11px 13px;margin-top:10px} .rc-sec.value h4{color:var(--gold)}
   .rc-sec ul{margin:0;padding-left:18px;font-size:13.5px;color:var(--txt)} .rc-sec li{margin-bottom:4px} .rc-sec p{font-size:13.5px;color:var(--txt)}
 
   /* BOARD */
@@ -424,7 +425,7 @@ const DEMO={
  },
 };
 
-const CONFIG={ SAGE_MIN:0.62, NORMAL_LOW:0.40, FUN_MAX:0.33, MAX_PICKS:6,
+const CONFIG={ SAGE_MIN:0.62, NORMAL_LOW:0.40, FUN_MAX:0.33, MAX_PICKS:8, MIN_PER_CAT:3,
   ODDS_ENDPOINT:'/api/odds',
   WHY_ENDPOINT:(location.hostname.endsWith('vercel.app')||location.hostname.endsWith('.now.sh'))?'/api/why':'https://api.anthropic.com/v1/messages' };
 const state={ sport:null, dayOffset:0, category:'sage', live:false, matchKey:null };
@@ -492,16 +493,24 @@ async function renderBoard(){
   }).join('');
 }
 function buildPicksForMatch(match,category){
-  const favSet=new Set(prof.favs);const meta=metaFor(match);const cands=[];
+  const favSet=new Set(prof.favs);const meta=metaFor(match);const all=[];
   for(const mk of match.markets){
     const pr=probsFor(mk);
     for(let i=0;i<mk.sels.length;i++){if(isNegativeSel(mk.sels[i]))continue;const p=pr[i];
-      const ok=category==='sage'?p>=CONFIG.SAGE_MIN:category==='normal'?(p>=CONFIG.NORMAL_LOW&&p<CONFIG.SAGE_MIN):(p<=CONFIG.FUN_MAX&&p>=0.04);
-      if(!ok)continue;
       const note=(match.notes&&match.notes[mk.sels[i]])||'';
-      cands.push({comp:match.comp,home:match.home,away:match.away,time:match.time,sel:mk.sels[i],market:mk.type,odd:mk.odds[i],prob:p,raw:!!mk.raw,fav:favSet.has(mk.type),note,meta,stats:match.stats||null});
+      all.push({comp:match.comp,home:match.home,away:match.away,time:match.time,sel:mk.sels[i],market:mk.type,odd:mk.odds[i],prob:p,raw:!!mk.raw,fav:favSet.has(mk.type),note,meta,stats:match.stats||null});
     }}
-  cands.sort((a,b)=>{if(a.fav!==b.fav)return a.fav?-1:1;return category==='fun'?b.odd-a.odd:b.prob-a.prob;});
+  const inCat=c=>x=>c==='sage'?x.prob>=CONFIG.SAGE_MIN:c==='normal'?(x.prob>=CONFIG.NORMAL_LOW&&x.prob<CONFIG.SAGE_MIN):(x.prob<=CONFIG.FUN_MAX&&x.prob>=0.04);
+  const sortFn=(a,b)=>{if(a.fav!==b.fav)return a.fav?-1:1;return category==='fun'?b.odd-a.odd:b.prob-a.prob;};
+  let cands=all.filter(inCat(category)).sort(sortFn);
+  // Si trop peu de paris passent le filtre strict, on complète avec les sélections les plus
+  // proches de la catégorie (par proba) pour ne jamais retomber sur une seule proposition.
+  if(cands.length<CONFIG.MIN_PER_CAT){
+    const target=category==='sage'?0.72:category==='normal'?0.50:0.22;
+    const extra=all.filter(x=>!cands.includes(x)).sort((a,b)=>Math.abs(a.prob-target)-Math.abs(b.prob-target));
+    cands=cands.concat(extra).slice(0,Math.max(CONFIG.MIN_PER_CAT,cands.length));
+    cands.sort(sortFn);
+  }
   return cands.slice(0,CONFIG.MAX_PICKS);
 }
 function renderMatchDetail(){
@@ -694,19 +703,25 @@ function heuristicEstimate(o,idea){
   return null;
 }
 async function analyzeCustom(o,idea,heur){
-  const sys=`Tu es un analyste paris sportifs honnête, façon trader/quant. Jamais "va passer"/"sûr"/"garanti". Réponds UNIQUEMENT en JSON valide : {"cote":number,"proba":number(0-1),"analyse":"2-3 phrases avec des chiffres concrets si possible","pour":["..."],"risques":["..."]}. Sois concret (stats, forme, contexte). Si donnée inconnue, estime prudemment.`;
+  const sys=`Tu es un analyste paris sportifs honnête, façon trader/quant. Jamais "va passer"/"sûr"/"garanti". Réponds UNIQUEMENT en JSON valide : {"cote":number,"proba":number(0-1),"analyse":"2-3 phrases avec des chiffres concrets","pour":["force 1","force 2"],"risques":["faiblesse 1","faiblesse 2"],"value":"verdict en 1 phrase : compare ta proba estimée à la cote implicite. Si ta proba > 1/cote du marché → value positive ; sinon → pas de value. Sois explicite."}. Sois concret (stats, forme, contexte récent). Si donnée inconnue, estime prudemment.`;
   const user=`Match (${o.sport==='tennis'?'tennis':'football'}, ${o.comp}) : ${o.home} contre ${o.away}. Pari : "${idea}". ${heur?`Départ interne : cote ≈ ${heur.odd}, proba ≈ ${(heur.prob*100).toFixed(0)}%.`:''} Donne cote, probabilité, analyse chiffrée, points pour et risques. Recherche web pour forme/blessures récentes.`;
   try{
     const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}]});
     let text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim().replace(/```json|```/g,'').trim();
     const j=JSON.parse(text);const badge=$('cBadge');if(badge)badge.outerHTML=`<div class="ai-badge">✦ analyse détaillée</div>`;
     const rc=document.querySelector('#cResult .rc-stats');if(rc&&(j.cote||j.proba))rc.innerHTML=`<div class="rc-stat"><div class="l">cote estimée</div><div class="v" style="color:var(--gold)">≈${Number(j.cote||(heur&&heur.odd)||0).toFixed(2)}</div></div><div class="rc-stat"><div class="l">probabilité</div><div class="v">${Math.round((j.proba||(heur&&heur.prob)||0)*100)} %</div></div><div class="rc-stat"><div class="l">source</div><div class="v" style="font-size:12px">IA + web</div></div>`;
-    $('cAnalysis').innerHTML=`<div class="rc-sec"><h4>📊 Analyse</h4><p>${esc(j.analyse||'')}</p></div>${(j.pour&&j.pour.length)?`<div class="rc-sec pour"><h4>✓ Points en faveur</h4><ul>${j.pour.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:''}${(j.risques&&j.risques.length)?`<div class="rc-sec risk"><h4>⚠ Risques</h4><ul>${j.risques.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:''}<div class="disclaim"><b>Rappel.</b> Estimation, pas une certitude.</div>`;
+    // Verdict value bet : utilise celui de l'IA, sinon le calcule (proba estimée vs cote du marché)
+    let valueHtml='';
+    const estProb=j.proba||(heur&&heur.prob)||0;const mktOdd=(heur&&heur.odd)||j.cote||0;
+    if(j.value){valueHtml=`<div class="rc-sec value"><h4>💰 Value bet ?</h4><p>${esc(j.value)}</p></div>`;}
+    else if(estProb&&mktOdd){const fair=1/estProb;const edge=((estProb*mktOdd)-1)*100;
+      valueHtml=`<div class="rc-sec value"><h4>💰 Value bet ?</h4><p>${edge>3?`✅ Value <b>positive</b> : à cote ${mktOdd.toFixed(2)}, ta proba estimée (${Math.round(estProb*100)} %) implique une cote "juste" de ${fair.toFixed(2)}. Marge théorique d'environ +${edge.toFixed(0)} %.`:edge<-3?`❌ <b>Pas de value</b> : à cote ${mktOdd.toFixed(2)}, ta proba estimée (${Math.round(estProb*100)} %) vaudrait une cote de ${fair.toFixed(2)}. Le marché te paie moins que le risque réel (${edge.toFixed(0)} %).`:`➖ <b>Neutre</b> : cote ${mktOdd.toFixed(2)} ≈ cote juste ${fair.toFixed(2)}. Pas d'edge clair dans un sens ou l'autre.`}</p></div>`;}
+    $('cAnalysis').innerHTML=`<div class="rc-sec"><h4>📊 Analyse</h4><p>${esc(j.analyse||'')}</p></div>${(j.pour&&j.pour.length)?`<div class="rc-sec pour"><h4>✓ Forces</h4><ul>${j.pour.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:''}${(j.risques&&j.risques.length)?`<div class="rc-sec risk"><h4>⚠ Faiblesses</h4><ul>${j.risques.map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`:''}${valueHtml}<div class="disclaim"><b>Rappel.</b> Estimation, pas une certitude.</div>`;
   }catch(e){const badge=$('cBadge');if(badge)badge.remove();
     if(e&&e.budget){
       $('cAnalysis').innerHTML=`<div class="rc-sec"><h4>📊 Analyse</h4><p>Budget IA du mois atteint (${e.spent.toFixed(2)} $ / ${e.cap} $). ${heur?`L'estimation chiffrée reste dispo : cote ≈ ${heur.odd.toFixed(2)} (proba ${Math.round(heur.prob*100)} %).`:`Réessaie le mois prochain, ou augmente <code>BUDGET_CAP_USD</code> dans les réglages Vercel.`}</p></div><div class="disclaim"><b>Rappel.</b> Rien ici n'est une garantie de gain.</div>`;
     }else{
-      $('cAnalysis').innerHTML=`<div class="rc-sec"><h4>📊 Analyse</h4><p>${heur?`Pari reconnu : cote estimée ≈ ${heur.odd.toFixed(2)} (proba ${Math.round(heur.prob*100)} %), calculée depuis les cotes du match. L'analyse rédigée nécessite l'IA connectée (clé Anthropic via <code>/api/why</code> en prod).`:`Pari libre/combiné : l'analyse rédigée nécessite l'IA connectée (clé Anthropic via <code>/api/why</code> en prod).`}</p></div><div class="disclaim"><b>Rappel.</b> Rien ici n'est une garantie de gain.</div>`;
+      $('cAnalysis').innerHTML=`<div class="rc-sec"><h4>📊 Analyse</h4><p>${heur?`Cote estimée ≈ ${heur.odd.toFixed(2)} (proba ${Math.round(heur.prob*100)} %), calculée depuis les cotes du match. L'analyse rédigée détaillée n'est pas disponible pour le moment — réessaie dans un instant.`:`Analyse momentanément indisponible — réessaie dans un instant.`}</p></div><div class="disclaim"><b>Rappel.</b> Rien ici n'est une garantie de gain.</div>`;
     }
   }
 }
@@ -776,7 +791,7 @@ async function refreshInfos(key,btn){
     const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();if(!text)throw 0;
     an.innerHTML=`<div class="an-row"><span class="k">Dernières infos (live web)</span><span class="v">${esc(text).replace(/\n/g,'<br>')}</span></div>`+old;
   }catch(e){
-    const msg=(e&&e.budget)?`Budget IA du mois atteint (${e.spent.toFixed(2)} $ / ${e.cap} $) — réessaie le mois prochain.`:`Indispo ici : la mise à jour live nécessite l'IA connectée (clé Anthropic via <code>/api/why</code> en prod).`;
+    const msg=(e&&e.budget)?`Budget IA du mois atteint (${e.spent.toFixed(2)} $ / ${e.cap} $) — réessaie le mois prochain.`:`Mise à jour momentanément indisponible — réessaie dans un instant.`;
     an.innerHTML=`<div class="an-row"><span class="k">Dernières infos</span><span class="v">${msg}</span></div>`+old;
   }
   btn.textContent='↻ Dernières infos';btn.disabled=false;
