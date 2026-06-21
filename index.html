@@ -137,6 +137,7 @@
   .mlinfo{flex:1;min-width:0}
   .mlcomp{font-family:var(--mono);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--txt-dim);display:flex;align-items:center;gap:6px}
   .mlteams{font-family:var(--disp);font-weight:600;font-size:16px;margin-top:3px}
+  .mlscore{display:inline-block;margin-top:5px;font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;color:var(--txt-dim);background:rgba(214,178,106,.10);border:1px solid rgba(214,178,106,.22);border-radius:6px;padding:2px 7px}
   .mlteams .vs{color:var(--txt-dim);font-weight:400;margin:0 6px;font-size:12px}
   .mltime{font-family:var(--mono);font-size:12px;color:var(--gold);flex:none;white-space:nowrap}
   .mlrow .chev{font-size:20px;color:var(--txt-dim);flex:none;line-height:1}
@@ -543,8 +544,9 @@ async function renderBoard(){
   if(!matches.length){$('matchList').innerHTML=`<div class="empty"><b>Aucun match ${labelSport().toLowerCase()} ${state.dayOffset?'demain':"aujourd'hui"}${state.live?'':' (démo)'}.</b></div>`;return;}
   $('matchList').innerHTML=matches.map(m=>{
     const st=matchStatus(m);const badge=st==='live'?`<span class="status live">● en cours${scoreLabel(m)}</span>`:st==='done'?`<span class="status done">terminé${scoreLabel(m)}</span>`:'';
+    const ts=(state.sport!=='tennis'&&m.topScore&&st!=='done')?`<span class="mlscore" title="Score exact le plus probable (estimation Aléa)">score probable ${esc(m.topScore.label)} · ${Math.round(m.topScore.prob*100)}%</span>`:'';
     return `<button class="mlrow" data-matchkey="${esc(m.home+'|'+m.away)}">
-      <div class="mlinfo"><span class="mlcomp">${esc(m.comp)} ${badge}</span><div class="mlteams">${esc(m.home)}<span class="vs">${state.sport==='tennis'?'vs':'–'}</span>${esc(m.away)}</div></div>
+      <div class="mlinfo"><span class="mlcomp">${esc(m.comp)} ${badge}</span><div class="mlteams">${esc(m.home)}<span class="vs">${state.sport==='tennis'?'vs':'–'}</span>${esc(m.away)}</div>${ts}</div>
       <div class="mltime">${m.time}</div><span class="chev">›</span>
     </button>`;
   }).join('');
