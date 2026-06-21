@@ -318,7 +318,7 @@
 </main>
 
 <footer class="ftr">
-  Cotes en <code>≈</code> : agrégées et indicatives. Stats affichées en mode démo : <b style="color:var(--txt-mut)">illustratives</b>, pas scrapées en direct (le live passe par l'IA + recherche web). Probabilités par de-vig. Aucune sélection n'est une garantie. 18+ — jouez ce que vous pouvez perdre. <span style="color:var(--txt-mut)">Aide : 09 74 75 13 13.</span>
+  <b style="color:var(--txt-mut)">Football</b> : les probabilités sont des <b style="color:var(--txt-mut)">estimations de notre modèle Aléa</b> (calcul de Poisson à partir de notes de force d'équipe), <b style="color:var(--txt-mut)">pas des cotes de bookmaker</b>. <b style="color:var(--txt-mut)">Tennis</b> : vraies cotes agrégées (probabilités par de-vig). Les paris buteur ne sont pas disponibles. Aucune sélection n'est une garantie. 18+ — jouez ce que vous pouvez perdre. <span style="color:var(--txt-mut)">Aide : 09 74 75 13 13.</span>
 </footer>
 
 <div class="scrim" id="scrim"></div>
@@ -495,7 +495,7 @@ function scoreLabel(m){return m.score?` · ${m.score.home}-${m.score.away}`:'';}
 function isNegativeSel(sel){return /ne marque pas|non décisif|ni l'un ni l'autre|aucun des deux/i.test(sel);}
 function smartTrio(m){
   const meta=metaFor(m);
-  const all=cleanSelections(m).map(x=>({sel:x.sel,market:x.market,odd:x.odd,prob:x.prob,raw:x.raw,meta,stats:m.stats||null}));
+  const all=cleanSelections(m).map(x=>({sel:x.sel,market:x.market,odd:x.odd,prob:x.prob,raw:x.raw,est:x.est,meta,stats:m.stats||null}));
   const used=new Set();
   const pick=(f,s)=>{let b=null;for(const c of all){if(used.has(c.sel)||!f(c))continue;if(!b||s(c)>s(b))b=c;}if(b)used.add(b.sel);return b;};
   const sur=pick(c=>c.prob>=0.60,c=>c.prob)||pick(()=>true,c=>c.prob);
@@ -505,7 +505,11 @@ function smartTrio(m){
 }
 function analysisRows(m,meta){
   if(m.analysis){const a=m.analysis;const r=[];if(a.forces)r.push(['Forces & faiblesses',a.forces]);if(a.dynamique)r.push(['Dynamique récente',a.dynamique]);if(a.stats)r.push(['Stats clés',a.stats]);if(a.absences)r.push(['Absences & incertitudes',a.absences]);if(a.enjeux)r.push(['Enjeux',a.enjeux]);return r;}
-  const r=[];if(m.ctx)r.push(['Contexte',m.ctx]);r.push(['Favori du marché',`${meta.favName} est favori selon les cotes ; ${meta.dogName} fait office d'outsider.`]);return r;
+  const r=[];if(m.ctx)r.push(['Contexte',m.ctx]);
+  const isModel=m.markets&&m.markets[0]&&m.markets[0].est;
+  if(isModel)r.push(['Favori estimé (modèle Aléa)',`${meta.favName} est jugé favori par notre modèle ; ${meta.dogName} fait office d'outsider. (Estimation Aléa, pas une cote de bookmaker.)`]);
+  else r.push(['Favori du marché',`${meta.favName} est favori selon les cotes ; ${meta.dogName} fait office d'outsider.`]);
+  return r;
 }
 
 async function loadData(sport,dayOffset){
@@ -554,7 +558,7 @@ function cleanSelections(match){
     const pr=probsFor(mk);
     let idxs=mk.sels.map((s,i)=>i).filter(i=>!isNegativeSel(mk.sels[i]));
     if(mk.sels.length===2&&idxs.length===2){idxs=[pr[idxs[0]]>=pr[idxs[1]]?idxs[0]:idxs[1]];}
-    for(const i of idxs)out.push({sel:mk.sels[i],market:mk.type,odd:mk.odds[i],prob:pr[i],raw:!!mk.raw});
+    for(const i of idxs)out.push({sel:mk.sels[i],market:mk.type,odd:mk.odds[i],prob:pr[i],raw:!!mk.raw,est:!!mk.est});
   }
   return out;
 }
@@ -572,7 +576,7 @@ function limitFamilies(list,maxPerFamily){
 }
 function buildPicksForMatch(match,category){
   const favSet=new Set(prof.favs);const meta=metaFor(match);
-  const all=cleanSelections(match).map(x=>({comp:match.comp,home:match.home,away:match.away,time:match.time,sel:x.sel,market:x.market,odd:x.odd,prob:x.prob,raw:x.raw,fav:favSet.has(x.market),note:(match.notes&&match.notes[x.sel])||'',meta,stats:match.stats||null}));
+  const all=cleanSelections(match).map(x=>({comp:match.comp,home:match.home,away:match.away,time:match.time,sel:x.sel,market:x.market,odd:x.odd,prob:x.prob,raw:x.raw,est:x.est,fav:favSet.has(x.market),note:(match.notes&&match.notes[x.sel])||'',meta,stats:match.stats||null}));
   const inCat=c=>x=>c==='sage'?x.prob>=CONFIG.SAGE_MIN:c==='normal'?(x.prob>=CONFIG.NORMAL_LOW&&x.prob<CONFIG.SAGE_MIN):(x.prob<=CONFIG.FUN_MAX&&x.prob>=0.04);
   const sortFn=(a,b)=>{if(a.fav!==b.fav)return a.fav?-1:1;return category==='fun'?b.odd-a.odd:b.prob-a.prob;};
   let cands=all.filter(inCat(category)).sort(sortFn);
@@ -618,7 +622,7 @@ function matchBlock(items,match){
 function enc(o){return encodeURIComponent(JSON.stringify(o));}
 function pickRow(p){
   const pct=Math.round(p.prob*100);
-  const meterLab=p.raw?'proba (cote)':'proba marché';
+  const meterLab=p.est?'estimation Aléa':p.raw?'proba (cote)':'proba marché';
   const pl=enc({sport:state.sport,comp:p.comp,home:p.home,away:p.away,time:p.time,day:state.dayOffset,sel:p.sel,market:p.market,odd:p.odd,prob:p.prob,note:p.note,raw:p.raw,meta:p.meta,stats:p.stats});
   return `<button class="prow" data-why="${pl}">
     <div class="prow-top">
@@ -631,7 +635,7 @@ function pickRow(p){
 }
 function labelSport(){return state.sport==='foot'?'Foot':'Tennis';}
 function catLabel(){return {sage:'Safe',normal:'Équilibré',fun:'Fun bet'}[state.category];}
-function catNoteText(n){const base={sage:"Issues que le marché juge très probables. Petites cotes — on sécurise.",normal:"Équilibre risque / rendement, idéal pour une montante.",fun:"Outsiders et gros scénarios — pour le frisson, pas le rendement."}[state.category];return `${n} sélection${n>1?'s':''} · ${base}`;}
+function catNoteText(n){const src=state.sport==='tennis'?'le marché':'notre modèle';const base={sage:`Issues que ${src} juge très probables. Petites cotes — on sécurise.`,normal:"Équilibre risque / rendement, idéal pour une montante.",fun:"Outsiders et gros scénarios — pour le frisson, pas le rendement."}[state.category];return `${n} sélection${n>1?'s':''} · ${base}`;}
 
 /* =========================================================================
    POURQUOI — moteur d'explication CHIFFRÉ et spécifique à chaque pari.
@@ -644,7 +648,7 @@ function reasonFor(p){
   const pct=Math.round(p.prob*100);
   const meta=p.meta||{}; const fav=meta.favName||'le favori', dog=meta.dogName||"l'adversaire";
   const st=p.stats||null; const m=p.market, s=p.sel;
-  const lvl=pct>=62?'probable selon le marché':pct>=40?'plausible mais incertain':'peu probable (gros pari)';
+  const lvl=pct>=62?'jugé probable':pct>=40?'plausible mais incertain':'peu probable (gros pari)';
 
   /* 1) TOTAL DE BUTS — toutes variantes (+1,5 / +2,5 / mi-temps) */
   if(m.indexOf("Plus ou moins")===0){
@@ -652,8 +656,8 @@ function reasonFor(p){
     const half=m.indexOf("première")>-1?' en 1re période':m.indexOf("seconde")>-1?' en 2de période':'';
     if(st){
       const totalAvg=(st.homeAvgFor+st.awayAvgFor).toFixed(1);
-      if(over) return `${fav} marque ${st.homeAvgFor} but/match en moyenne sur sa série actuelle (${st.homeForm}), ${dog} ${st.awayAvgFor} (${st.awayForm}). Moyenne combinée : ${totalAvg} buts/match. ${st.over25} % de leurs matchs récents ont dépassé les 2,5 buts — cohérence statistique correcte avec ce pari${half} (marché : ${pct} %).`;
-      return `Moyenne combinée de ${totalAvg} buts/match (${fav} ${st.homeAvgFor}, ${dog} ${st.awayAvgFor}), mais ${st.homeAvgAgainst<=st.awayAvgAgainst?fav:dog} ne concède que ${Math.min(st.homeAvgAgainst,st.awayAvgAgainst)} but/match : un scénario plus fermé${half} reste cohérent. Marché : ${pct} % — ${lvl}.`;
+      if(over) return `${fav} marque ${st.homeAvgFor} but/match en moyenne sur sa série actuelle (${st.homeForm}), ${dog} ${st.awayAvgFor} (${st.awayForm}). Moyenne combinée : ${totalAvg} buts/match. ${st.over25} % de leurs matchs récents ont dépassé les 2,5 buts — cohérence statistique correcte avec ce pari${half} (proba estimée : ${pct} %).`;
+      return `Moyenne combinée de ${totalAvg} buts/match (${fav} ${st.homeAvgFor}, ${dog} ${st.awayAvgFor}), mais ${st.homeAvgAgainst<=st.awayAvgAgainst?fav:dog} ne concède que ${Math.min(st.homeAvgAgainst,st.awayAvgAgainst)} but/match : un scénario plus fermé${half} reste cohérent. Proba estimée : ${pct} % — ${lvl}.`;
     }
     if(over) return `Parier le total au-dessus du seuil${half} (${pct} %) suppose un match ouvert : ${fav} efficace devant, défenses qui cèdent des espaces.`;
     return `Parier sous le seuil${half} (${pct} %) suppose un match fermé : ${fav} qui gère sans s'emballer, rencontre verrouillée.`;
@@ -663,8 +667,8 @@ function reasonFor(p){
   if(m==="Les deux équipes marquent (BTTS)"){
     const no=/Pas les deux|Non/i.test(s);
     if(st){
-      if(no) return `${dog} ne marque que dans ${st.bttsAway} % de ses matchs récents, et ${fav} ne concède que ${st.homeAvgAgainst} but/match en moyenne : au moins une défense devrait tenir. ${st.h2h} Marché : ${pct} %.`;
-      return `${fav} marque dans ${st.bttsHome} % de ses matchs récents, ${dog} dans ${st.bttsAway} %. Leurs défenses concèdent respectivement ${st.homeAvgAgainst} et ${st.awayAvgAgainst} but/match : assez d'espaces pour que les deux trouvent le chemin des filets. ${st.h2h} Marché : ${pct} % — ${lvl}.`;
+      if(no) return `${dog} ne marque que dans ${st.bttsAway} % de ses matchs récents, et ${fav} ne concède que ${st.homeAvgAgainst} but/match en moyenne : au moins une défense devrait tenir. ${st.h2h} Proba estimée : ${pct} %.`;
+      return `${fav} marque dans ${st.bttsHome} % de ses matchs récents, ${dog} dans ${st.bttsAway} %. Leurs défenses concèdent respectivement ${st.homeAvgAgainst} et ${st.awayAvgAgainst} but/match : assez d'espaces pour que les deux trouvent le chemin des filets. ${st.h2h} Proba estimée : ${pct} % — ${lvl}.`;
     }
     if(no) return `Il faut qu'au moins une défense tienne (${pct} %) : cohérent si ${fav} verrouille ou si ${dog} reste inoffensif.`;
     return `Il faut que LES DEUX marquent (${pct} %) : ${fav} devrait trouver la faille, la question est la capacité de ${dog} à marquer aussi.`;
@@ -672,9 +676,9 @@ function reasonFor(p){
 
   /* 3) RÉSULTAT DU MATCH / VAINQUEUR */
   if(m.indexOf("Résultat du match")===0||m==="Vainqueur"){
-    if(/nul/i.test(s)) return `Le nul se joue si les deux équipes se neutralisent (${pct} % selon le marché) — cohérent si le niveau est proche et que les deux jouent prudemment.`;
+    if(/nul/i.test(s)) return `Le nul se joue si les deux équipes se neutralisent (${pct} % estimé) — cohérent si le niveau est proche et que les deux jouent prudemment.`;
     if(s===fav){
-      if(st) return `${fav} : ${st.homeForm||st.awayForm}. En face, ${dog} : ${st.awayForm||st.homeForm}. Sur le papier, ${st.homeAvgFor>=st.awayAvgFor?(fav+' marque plus ('+st.homeAvgFor+' vs '+st.awayAvgFor+' but/match)'):('les deux attaques se tiennent, mais '+fav+' concède moins')}. Risque principal : ${dog} qui ferme le jeu, ou du déchet offensif côté ${fav} malgré la domination. Marché : ${pct} %.`;
+      if(st) return `${fav} : ${st.homeForm||st.awayForm}. En face, ${dog} : ${st.awayForm||st.homeForm}. Sur le papier, ${st.homeAvgFor>=st.awayAvgFor?(fav+' marque plus ('+st.homeAvgFor+' vs '+st.awayAvgFor+' but/match)'):('les deux attaques se tiennent, mais '+fav+' concède moins')}. Risque principal : ${dog} qui ferme le jeu, ou du déchet offensif côté ${fav} malgré la domination. Proba estimée : ${pct} %.`;
       return `${fav} est favori (${pct} %) : forme et niveau supérieurs. Risque : un ${dog} accrocheur ou un but encaissé tôt.`;
     }
     if(st) return `Miser ${s}, c'est jouer l'exploit de l'outsider (${pct} %) : il faudrait limiter ${fav} (qui marque ${st.homeAvgFor>=st.awayAvgFor?st.homeAvgFor:st.awayAvgFor} but/match en moyenne) et être clinique sur les rares occasions. Gros rendement, faible probabilité.`;
@@ -699,7 +703,7 @@ function reasonFor(p){
   if(m==="Buteur à tout moment"){
     if(/ne marque pas|non décisif/i.test(s))return `Pari inverse : ${s.replace(/ ne marque pas| non décisif/i,'')} reste muet (${pct} %).`;
     const who=s.replace(/ marque| buteur ou passeur/i,'');
-    return `Ce qui compte ici, c'est l'historique de ${who} lui-même : sa fréquence de buts sur ses derniers matchs, sa position dans l'équipe (axe vs côté) et sa probable titularisation — pas la solidité de la défense en face. Marché : ${pct} %.`;
+    return `Ce qui compte ici, c'est l'historique de ${who} lui-même : sa fréquence de buts sur ses derniers matchs, sa position dans l'équipe (axe vs côté) et sa probable titularisation — pas la solidité de la défense en face. Proba estimée : ${pct} %.`;
   }
   if(m==="Premier buteur du match"||m==="Dernier buteur du match")return `Marché très ouvert (beaucoup de candidats), d'où la grosse cote. Ce qui rend ${s} crédible, c'est son propre profil de buteur récent (régularité, rôle dans le système) — pas le niveau de la défense adverse. Reste une loterie par nature (${pct} %).`;
   if(m==="Équipe qui ouvre le score"){if(/Aucun/i.test(s))return `Parier le 0-0 : rare, surtout avec ${fav} en attaque (${pct} %).`;return `${s.replace(/ ouvre le score/i,'')} marque en premier — souvent le favori qui met la pression d'entrée (${pct} %).`;}
@@ -710,8 +714,8 @@ function reasonFor(p){
 
   /* 7) MI-TEMPS */
   if(m==="Résultat à la mi-temps"){
-    if(/nul/i.test(s))return `Les équipes démarrent souvent prudemment : le nul à la pause est fréquent, surtout si aucune des deux n'a l'habitude de se livrer dès l'entame. Marché : ${pct} %.`;
-    return `Ce qui compte ici, ce n'est pas la forme générale mais la tendance précise de ${s} en 1re période (marque-t-il plus tôt ou plus tard dans ses matchs récents ?) — une équipe qui démarre fort n'est pas forcément celle qui finit fort. Lance l'analyse IA détaillée pour vérifier ce point équipe par équipe. Marché : ${pct} %.`;
+    if(/nul/i.test(s))return `Les équipes démarrent souvent prudemment : le nul à la pause est fréquent, surtout si aucune des deux n'a l'habitude de se livrer dès l'entame. Proba estimée : ${pct} %.`;
+    return `Ce qui compte ici, ce n'est pas la forme générale mais la tendance précise de ${s} en 1re période (marque-t-il plus tôt ou plus tard dans ses matchs récents ?) — une équipe qui démarre fort n'est pas forcément celle qui finit fort. Lance l'analyse IA détaillée pour vérifier ce point équipe par équipe. Proba estimée : ${pct} %.`;
   }
   if(m.indexOf("mi-temps / fin de match")>-1)return `Scénario combiné (pause + score final) précis : peu probable par nature, grosse cote (${pct} %).`;
   if(m==="But dans les deux mi-temps"){if(/Non/i.test(s))return `Tu paries qu'au moins une mi-temps reste vierge (${pct} %).`;return `Il faut un but dans CHAQUE période : demande un match ouvert du début à la fin (${pct} %).`;}
@@ -722,7 +726,7 @@ function reasonFor(p){
   if(m==="Nombre total de cartons")return `Lié à l'intensité du match et au profil de l'arbitre plus qu'au score (${pct} %).`;
   if(m==="Joueur averti (carton jaune)"||m==="Joueur expulsé (carton rouge)"){
     const who=s.replace(/ averti| expulsé/i,'');
-    return `Ce qui compte ici, c'est le profil disciplinaire de ${who} lui-même : son poste (un milieu récupérateur ou un défenseur prend plus de cartons qu'un attaquant), son historique personnel d'avertissements et l'enjeu du match pour lui — pas l'intensité générale de la rencontre. ${/expulsé/i.test(m)?'Un rouge reste de toute façon un événement rare. ':''}Marché : ${pct} %.`;
+    return `Ce qui compte ici, c'est le profil disciplinaire de ${who} lui-même : son poste (un milieu récupérateur ou un défenseur prend plus de cartons qu'un attaquant), son historique personnel d'avertissements et l'enjeu du match pour lui — pas l'intensité générale de la rencontre. ${/expulsé/i.test(m)?'Un rouge reste de toute façon un événement rare. ':''}Proba estimée : ${pct} %.`;
   }
   if(m==="Total jeux"||m==="Nombre de sets"||m==="Handicap jeux"){
     if(st)return `Sur le format de la rencontre (${pct} %) : ${fav} — ${st.homeForm}. ${dog} — ${st.awayForm}. ${st.h2h}`;
@@ -830,13 +834,13 @@ document.addEventListener('click',e=>{
   const b=e.target.closest('[data-why]');if(b){openWhy(JSON.parse(decodeURIComponent(b.dataset.why)));return;}
   const r=e.target.closest('[data-refresh]');if(r){e.stopPropagation();refreshInfos(r.dataset.refresh,r);}
 });
-function statBlock(p,pct){const lab=p.raw?'proba (cote)':'proba marché';return `<div class="factline"><div class="stat"><div class="sl">cote ≈</div><div class="sv" style="color:var(--gold)">${p.odd.toFixed(2)}</div></div><div class="stat"><div class="sl">${lab}</div><div class="sv">${pct} %</div></div><div class="stat"><div class="sl">soit 1 sur</div><div class="sv">${(1/p.prob).toFixed(1)}</div></div></div>`;}
-function disclaimer(pct){return `<div class="disclaim"><b>Rappel.</b> Ces ${pct} % sont l'avis du <i>marché</i>, pas une certitude — il se trompe souvent, c'est là qu'est la value. Rien ici n'est une garantie de gain.</div>`;}
+function statBlock(p,pct){const lab=p.est?'estimation Aléa':p.raw?'proba (cote)':'proba marché';return `<div class="factline"><div class="stat"><div class="sl">cote ≈</div><div class="sv" style="color:var(--gold)">${p.odd.toFixed(2)}</div></div><div class="stat"><div class="sl">${lab}</div><div class="sv">${pct} %</div></div><div class="stat"><div class="sl">soit 1 sur</div><div class="sv">${(1/p.prob).toFixed(1)}</div></div></div>`;}
+function disclaimer(pct,est){return `<div class="disclaim"><b>Rappel.</b> ${est?`Ces ${pct} % sont une <i>estimation de notre modèle Aléa</i> (calcul de probabilités maison), pas une cote de bookmaker ni une certitude.`:`Ces ${pct} % sont l'avis du <i>marché</i>, pas une certitude — il se trompe souvent, c'est là qu'est la value.`} Rien ici n'est une garantie de gain.</div>`;}
 function openWhy(p){
   drawer.style.setProperty('--accent',`var(--${state.category})`);
   $('dwTitle').textContent=`${p.home} ${state.sport==='tennis'?'vs':'–'} ${p.away}`;$('dwTag').textContent=p.sel;
   const pct=Math.round(p.prob*100);const body=$('dwBody');const reason=p.note?p.note:reasonFor(p);
-  body.innerHTML=statBlock(p,pct)+`<p>${esc(reason)}</p>`+`<button class="ai-trigger" id="aiTriggerBtn">✦ Voir l'analyse IA détaillée</button>`+disclaimer(pct);
+  body.innerHTML=statBlock(p,pct)+`<p>${esc(reason)}</p>`+`<button class="ai-trigger" id="aiTriggerBtn">✦ Voir l'analyse IA détaillée</button>`+disclaimer(pct,p.est);
   drawer.classList.add('open');scrim.classList.add('open');drawer.setAttribute('aria-hidden','false');
   const btn=$('aiTriggerBtn');
   if(btn) btn.onclick=()=>{
@@ -875,7 +879,8 @@ async function askClaude(p,pct){
   const dayTxt=p.day?'demain':"aujourd'hui";const sportTxt=state.sport==='tennis'?'tennis':'football';
   const sys=`Tu es un analyste paris sportifs honnête, façon trader/quant. Jamais "va passer"/"sûr"/"garanti". Ancre sur la proba implicite fournie. Structure ta réponse en deux temps : d'abord UNE phrase courte qui résume directement pourquoi ce pari se tient (l'essentiel, sans détail) ; puis, dans un second paragraphe, le détail chiffré (stats, forme) qui appuie ce résumé, avec le risque principal à la fin. Explique précisément CE pari (ce marché, cette sélection), pas le match en général. Français, 100-150 mots, 2-3 paragraphes courts et fluides (pas de liste à puces), tu peux utiliser 2-3 emojis sobres pour ponctuer (ex: 📊 pour une stat, ⚠️ pour le risque) sans en abuser, pas de titres en gras.`;
   const half=/mi-temps/i.test(p.market)?` Comme ce pari concerne la mi-temps, cherche spécifiquement si ${p.home} ou ${p.away} a tendance à marquer/encaisser plus en 1re ou en 2de période sur ses derniers matchs — c'est ça qui compte ici, pas juste la forme générale.`:'';
-  const user=`${sportTxt}, ${p.comp}, ${dayTxt} : ${p.home} contre ${p.away}. Sélection : "${p.sel}" (${p.market}), cote ≈ ${p.odd.toFixed(2)}, ~${pct} % implicite. Pourquoi spécifiquement CE pari se tient, avec des chiffres concrets et son risque (recherche web).${half} Termine en rappelant que ces ~${pct} % sont l'avis du marché.`;
+  const probSrc=p.est?`~${pct} % est une ESTIMATION de notre modèle maison (Poisson sur des notes de force d'équipe), PAS une cote de bookmaker`:`~${pct} % implicite (issu des cotes du marché)`;
+  const user=`${sportTxt}, ${p.comp}, ${dayTxt} : ${p.home} contre ${p.away}. Sélection : "${p.sel}" (${p.market}), cote ≈ ${p.odd.toFixed(2)}, ${probSrc}. Pourquoi spécifiquement CE pari se tient, avec des chiffres concrets et son risque (recherche web).${half} ${p.est?`Précise honnêtement que ce pourcentage vient d'un modèle d'estimation, pas du marché.`:`Termine en rappelant que ces ~${pct} % sont l'avis du marché.`}`;
   const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}]});
   const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
   if(!text)throw new Error('empty');return text;
