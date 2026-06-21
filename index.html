@@ -560,7 +560,10 @@ function cleanSelections(match){
 }
 // Regroupe les types de marchés trop proches conceptuellement (1X2/Double chance/DNB racontent
 // tous "telle équipe gagne ou ne perd pas") pour éviter d'empiler 3 variantes du même pari.
-const MARKET_FAMILY={"1X2":"résultat","Vainqueur":"résultat","Double chance":"résultat","Pari remboursé si match nul (Draw No Bet)":"résultat","Total buts":"buts","Total sets":"buts","Les deux équipes marquent (BTTS)":"buts"};
+const MARKET_FAMILY={"1X2":"résultat","Vainqueur":"résultat","Double chance":"résultat","Pari remboursé si match nul (Draw No Bet)":"résultat","Total buts":"buts","Total sets":"buts","Les deux équipes marquent (BTTS)":"btts"};
+// Les marchés non listés (Résultat à la mi-temps, Buts de X, Score exact…) gardent leur propre
+// nom comme "famille" via le fallback ci-dessous -> chacun compte comme une famille distincte,
+// ce qui maximise la diversité des paris proposés dans chaque catégorie.
 function familyOf(market){return MARKET_FAMILY[market]||market;}
 function limitFamilies(list,maxPerFamily){
   const seen=new Map();const out=[];
