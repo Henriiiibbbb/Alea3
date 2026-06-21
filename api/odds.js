@@ -1,207 +1,308 @@
-// api/odds.js — Proxy The Odds API (région "fr"), pour Vercel (Node serverless).
-// Cache la clé (env THE_ODDS_API_KEY) et règle le CORS.
-// Renvoie : { "Nom compétition": [ {home,away,time,offset,markets:[{type,sels,odds}]} ] }
+// api/odds.js — Proxy hybride pour Vercel (Node serverless).
 //
-// Le foot demande jusqu'à 7 marchés (h2h,totals,btts,double_chance,draw_no_bet,h2h_h1,totals_h1) au
-// lieu de 2 à l'origine : ça coûte plus de crédits par appel chez The Odds API. Le cache de 2 min
-// (en bas du fichier) limite la casse, mais surveille ta conso sur the-odds-api.com si tu approches
-// le palier gratuit. Les marchés mi-temps (h2h_h1/totals_h1) sont EXPÉRIMENTAUX : la doc officielle
-// les associe surtout à l'endpoint historique (payant, 10x le coût), pas garanti qu'ils remontent en
-// direct. D'où le filet de sécurité à 3 paliers ci-dessous : si le palier le plus riche échoue, on
-// retombe sur celui qui marchait déjà, jamais sur rien.
-// Les marchés joueurs (buteur...) ne sont eux PAS disponibles pour la Coupe du Monde, quel que soit
-// l'effort mis ici — réservés à EPL/Ligue 1/Bundesliga/Serie A/Liga/MLS, et via bookmakers US.
+//  • FOOT   -> API-Football (api-sports.io). Clé dans l'env Vercel : API_FOOTBALL_KEY.
+//             Bien plus de marchés que The Odds API (1X2, total buts multi-lignes, BTTS,
+//             double chance, mi-temps, buts par équipe, score exact…), + score ET MINUTE en direct.
+//  • TENNIS -> The Odds API (inchangé). Clé dans l'env Vercel : THE_ODDS_API_KEY.
+//             (API-Football ne couvre que le foot, donc on garde l'ancienne source pour le tennis.)
+//
+// Sortie (identique à avant, pour ne rien casser dans index.html) :
+//   { "Nom compétition": [ { id, home, away, time, date, offset,
+//                            markets:[ {type, sels:[...], odds:[...], raw?} ],
+//                            score?:{home,away}, completed?, minute? } ] }
+//
+// IMPORTANT (honnêteté) : la dispo réelle des cotes API-Football pour la Coupe du Monde sur le
+// plan gratuit n'est pas garantie à 100 % — c'est précisément ce qu'on teste avec ce branchement.
+// Le code est défensif : si les cotes ne reviennent pas, la compétition est simplement vide
+// (et index.html bascule alors sur sa démo).
 
-// Mappe le "sport" de l'app -> clés The Odds API + nom d'affichage de la compétition.
-// Le foot reste en dur (les championnats/compétitions ne changent pas de clé en cours de saison).
-// Le tennis, lui, change de tournoi CHAQUE SEMAINE (clé différente à chaque fois) : au lieu de
-// deviner/figer un tournoi qui devient vite obsolète, on demande à l'API quels tournois ATP sont
-// actuellement en cours (voir discoverTennisTargets ci-dessous) — ça s'adapte tout seul, sans
-// jamais avoir besoin de retoucher ce fichier semaine après semaine.
-const SPORTS = {
-  foot: [
-    { key: "soccer_fifa_world_cup",   comp: "Coupe du Monde 2026" },
-    { key: "soccer_france_ligue_one", comp: "Ligue 1" },
-    { key: "soccer_uefa_champs_league", comp: "Ligue des Champions" },
-  ],
-};
+/* ============================ FOOT — API-Football ============================ */
 
-// Liste les tournois ATP "en saison" en ce moment via l'endpoint /sports (gratuit, ne coûte
-// aucun crédit). On garde au plus 4 tournois pour limiter le nombre d'appels ensuite.
+const AF_BASE = "https://v3.football.api-sports.io";
+// league = identifiant API-Football ; season = année de DÉBUT de saison.
+// En juin, seules les compétitions encore en cours renvoient des matchs (la CdM 2026, donc).
+const AF_LEAGUES = [
+  { league: 1,  season: 2026, comp: "Coupe du Monde 2026" },
+  { league: 61, season: 2025, comp: "Ligue 1" },
+  { league: 2,  season: 2025, comp: "Ligue des Champions" },
+];
+const AF_MAX_FIXTURES_ODDS = 6; // borne le nb d'appels cotes par compétition (économie de quota)
+
+const LIVE_ST = new Set(["1H", "2H", "HT", "ET", "BT", "P", "LIVE", "INT", "SUSP"]);
+const DONE_ST = new Set(["FT", "AET", "PEN", "AWD", "WO"]);
+
+function afHeaders(apiKey) {
+  // API-Football veut la clé dans un header (pas dans l'URL) — d'où l'échec du test Safari.
+  return { "x-apisports-key": apiKey };
+}
+
+async function afGet(path, apiKey) {
+  const r = await fetch(`${AF_BASE}${path}`, { headers: afHeaders(apiKey) });
+  if (!r.ok) return null;
+  return await r.json(); // API-Football renvoie 200 + {response:[], errors:{...}} en cas de souci -> géré en aval
+}
+
+function oddOf(bet, label) {
+  const v = bet.values.find(x => String(x.value).toLowerCase() === label.toLowerCase());
+  return v ? parseFloat(v.odd) : null;
+}
+
+// Regroupe les valeurs "Over X / Under X" par ligne -> { "2.5":{over,under}, ... }
+function ouLines(bet) {
+  const lines = {};
+  for (const v of bet.values) {
+    const m = String(v.value).match(/(Over|Under)\s+([\d.]+)/i);
+    if (!m) continue;
+    (lines[m[2]] = lines[m[2]] || {})[m[1].toLowerCase()] = parseFloat(v.odd);
+  }
+  return lines;
+}
+
+// Transforme les "bets" d'un bookmaker API-Football en notre format de marchés.
+function afBuildMarkets(bets, home, away) {
+  const out = [];
+  const find = (re) => bets.find(b => re.test(b.name));
+
+  // 1X2
+  const mw = find(/^match winner$/i);
+  if (mw) {
+    const h = oddOf(mw, "Home"), d = oddOf(mw, "Draw"), a = oddOf(mw, "Away");
+    if (h && d && a) out.push({ type: "1X2", sels: [home, "Match nul", away], odds: [h, d, a] });
+  }
+
+  // Double chance
+  const dc = find(/^double chance$/i);
+  if (dc) {
+    const hd = oddOf(dc, "Home/Draw"), ha = oddOf(dc, "Home/Away"), da = oddOf(dc, "Draw/Away");
+    if (hd && ha && da)
+      out.push({ type: "Double chance", sels: [`${home} ou nul`, `${home} ou ${away}`, `nul ou ${away}`], odds: [hd, ha, da], raw: true });
+  }
+
+  // Total de buts (toutes les lignes dispos entre 0.5 et 5.5 -> variété pour remplir les catégories)
+  const ou = find(/^goals over\/under$/i);
+  if (ou) {
+    const lines = ouLines(ou);
+    for (const line of Object.keys(lines)) {
+      const L = parseFloat(line);
+      if (L < 0.5 || L > 5.5) continue;
+      const { over, under } = lines[line];
+      if (over && under) out.push({ type: "Total buts", sels: [`+${line} buts`, `-${line} buts`], odds: [over, under] });
+    }
+  }
+
+  // Les deux équipes marquent
+  const btts = find(/^both teams (to )?score$/i);
+  if (btts) {
+    const y = oddOf(btts, "Yes"), n = oddOf(btts, "No");
+    if (y && n) out.push({ type: "Les deux équipes marquent (BTTS)", sels: ["Les deux équipes marquent", "Pas les deux"], odds: [y, n] });
+  }
+
+  // Résultat à la mi-temps
+  const fhw = find(/^(first half winner|halftime result|1st half winner)$/i);
+  if (fhw) {
+    const h = oddOf(fhw, "Home"), d = oddOf(fhw, "Draw"), a = oddOf(fhw, "Away");
+    if (h && d && a) out.push({ type: "Résultat à la mi-temps", sels: [home, "Match nul", away], odds: [h, d, a] });
+  }
+
+  // Buts en première mi-temps
+  const ouH1 = find(/first half.*over\/under|goals over\/under first half/i);
+  if (ouH1) {
+    const lines = ouLines(ouH1);
+    for (const line of Object.keys(lines)) {
+      const L = parseFloat(line);
+      if (L < 0.5 || L > 3.5) continue;
+      const { over, under } = lines[line];
+      if (over && under) out.push({ type: "Plus ou moins de buts en première mi-temps", sels: [`+${line} but (1re MT)`, `-${line} but (1re MT)`], odds: [over, under] });
+    }
+  }
+
+  // Résultat 2e mi-temps
+  const shw = find(/^(second half winner|2nd half winner)$/i);
+  if (shw) {
+    const h = oddOf(shw, "Home"), d = oddOf(shw, "Draw"), a = oddOf(shw, "Away");
+    if (h && d && a) out.push({ type: "Résultat de la seconde mi-temps", sels: [home, "Match nul", away], odds: [h, d, a] });
+  }
+
+  // Buts par équipe (familles distinctes -> diversité)
+  const th = find(/^total - home$/i);
+  if (th) {
+    const lines = ouLines(th);
+    const line = lines["1.5"] || lines["0.5"] || lines["2.5"];
+    if (line && line.over && line.under) {
+      const lbl = lines["1.5"] ? "1.5" : lines["0.5"] ? "0.5" : "2.5";
+      out.push({ type: `Buts de ${home}`, sels: [`${home} +${lbl}`, `${home} -${lbl}`], odds: [line.over, line.under] });
+    }
+  }
+  const ta = find(/^total - away$/i);
+  if (ta) {
+    const lines = ouLines(ta);
+    const line = lines["1.5"] || lines["0.5"] || lines["2.5"];
+    if (line && line.over && line.under) {
+      const lbl = lines["1.5"] ? "1.5" : lines["0.5"] ? "0.5" : "2.5";
+      out.push({ type: `Buts de ${away}`, sels: [`${away} +${lbl}`, `${away} -${lbl}`], odds: [line.over, line.under] });
+    }
+  }
+
+  // Score exact : on garde le plus probable (cote la plus basse) comme pari "fun"
+  const ex = find(/^exact score$/i);
+  if (ex && ex.values.length) {
+    let best = null;
+    for (const v of ex.values) {
+      const o = parseFloat(v.odd);
+      if (o && (!best || o < best.odd)) best = { score: v.value, odd: o };
+    }
+    if (best) out.push({ type: "Score exact", sels: [best.score.replace(":", "-")], odds: [best.odd], raw: true });
+  }
+
+  return out;
+}
+
+// Choisit le bookmaker le plus fourni (celui qui a le plus de "bets") pour maximiser la diversité.
+function pickBookmaker(oddsItem) {
+  const bks = oddsItem && oddsItem.bookmakers;
+  if (!bks || !bks.length) return null;
+  return bks.reduce((best, b) => (!best || (b.bets || []).length > (best.bets || []).length ? b : best), null);
+}
+
+async function loadFoot(apiKey, day) {
+  const wantDate = parisDateKeyOffset(day);
+  const result = {};
+  for (const { league, season, comp } of AF_LEAGUES) {
+    try {
+      // 1) Fixtures du jour voulu (1 requête) — donne équipes, heure, score live + minute + statut.
+      const fx = await afGet(`/fixtures?league=${league}&season=${season}&date=${wantDate}&timezone=Europe/Paris`, apiKey);
+      const fixtures = (fx && fx.response) || [];
+      if (!fixtures.length) continue;
+
+      const matches = [];
+      let oddsCalls = 0;
+      for (const f of fixtures) {
+        const id = f.fixture.id;
+        const home = f.teams.home.name, away = f.teams.away.name;
+        const iso = f.fixture.date;
+        const st = f.fixture.status?.short;
+        const elapsed = f.fixture.status?.elapsed;
+
+        let markets = [];
+        if (oddsCalls < AF_MAX_FIXTURES_ODDS) {
+          oddsCalls++;
+          // 2) Cotes de ce match (1 requête / match) — c'est là qu'est la richesse des marchés.
+          const od = await afGet(`/odds?fixture=${id}&timezone=Europe/Paris`, apiKey);
+          const item = od && od.response && od.response[0];
+          const bk = pickBookmaker(item);
+          if (bk) markets = afBuildMarkets(bk.bets || [], home, away);
+        }
+        if (!markets.length) continue; // sans cotes, pas de pari à proposer -> on saute
+
+        const m = {
+          id, home, away,
+          time: parisTime(iso), date: parisDateKeyFromISO(iso), offset: day, markets,
+        };
+        // Score + minute en direct (bonus API-Football : la minute, que The Odds API ne donnait pas)
+        if (f.goals && (f.goals.home !== null || f.goals.away !== null)) {
+          m.score = { home: Number(f.goals.home || 0), away: Number(f.goals.away || 0) };
+        }
+        if (DONE_ST.has(st)) m.completed = true;
+        else if (LIVE_ST.has(st) && typeof elapsed === "number") m.minute = elapsed;
+        matches.push(m);
+      }
+      if (matches.length) result[comp] = matches;
+    } catch (_) { /* compétition en erreur : on ignore, on ne casse pas le reste */ }
+  }
+  return result;
+}
+
+/* ============================ TENNIS — The Odds API (inchangé) ============================ */
+
 async function discoverTennisTargets(apiKey) {
   try {
     const r = await fetch(`https://api.the-odds-api.com/v4/sports/?apiKey=${apiKey}`);
     if (!r.ok) return [];
     const sports = await r.json();
-    return sports
-      .filter(s => s.key && s.key.startsWith("tennis_atp_") && s.active)
-      .slice(0, 4)
+    return sports.filter(s => s.key && s.key.startsWith("tennis_atp_") && s.active).slice(0, 4)
       .map(s => ({ key: s.key, comp: s.title || s.key }));
   } catch (_) { return []; }
 }
 
-// Décale une date ISO (UTC) vers la date "calendaire" à Paris (YYYY-MM-DD)
-function parisDateKey(iso) {
-  return new Intl.DateTimeFormat("fr-CA", {
-    timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date(iso));
-}
-function parisTime(iso) {
-  return new Intl.DateTimeFormat("fr-FR", {
-    timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit",
-  }).format(new Date(iso));
-}
-function todayKeys() {
-  const now = new Date();
-  const t0 = parisDateKey(now.toISOString());
-  const tmrw = new Date(now.getTime() + 24 * 3600 * 1000);
-  const t1 = parisDateKey(tmrw.toISOString());
-  return { t0, t1 };
-}
-
-// h2h (1X2 / vainqueur) + totals -> nos "markets"
-function buildMarkets(ev, isTennis) {
+function buildTennisMarkets(ev) {
   const out = [];
-  const bk = (ev.bookmakers && ev.bookmakers[0]) || null; // 1er book de la région
+  const bk = (ev.bookmakers && ev.bookmakers[0]) || null;
   if (!bk) return out;
-
   const h2h = bk.markets?.find(m => m.key === "h2h");
   if (h2h) {
-    if (isTennis) {
-      const a = h2h.outcomes.find(o => o.name === ev.home_team);
-      const b = h2h.outcomes.find(o => o.name === ev.away_team);
-      if (a && b) out.push({ type: "Vainqueur", sels: [a.name, b.name], odds: [a.price, b.price] });
-    } else {
-      const home = h2h.outcomes.find(o => o.name === ev.home_team);
-      const away = h2h.outcomes.find(o => o.name === ev.away_team);
-      const draw = h2h.outcomes.find(o => o.name === "Draw");
-      if (home && away && draw)
-        out.push({ type: "1X2", sels: [home.name, "Match nul", away.name], odds: [home.price, draw.price, away.price] });
-    }
+    const a = h2h.outcomes.find(o => o.name === ev.home_team);
+    const b = h2h.outcomes.find(o => o.name === ev.away_team);
+    if (a && b) out.push({ type: "Vainqueur", sels: [a.name, b.name], odds: [a.price, b.price] });
   }
-
   const totals = bk.markets?.find(m => m.key === "totals");
   if (totals && totals.outcomes?.length >= 2) {
     const over = totals.outcomes.find(o => /over/i.test(o.name));
     const under = totals.outcomes.find(o => /under/i.test(o.name));
     if (over && under) {
       const pt = over.point ?? "";
-      const unit = isTennis ? "sets" : "buts";
-      out.push({ type: isTennis ? "Total sets" : "Total buts",
-        sels: [`+${pt} ${unit}`, `-${pt} ${unit}`], odds: [over.price, under.price] });
-    }
-  }
-
-  // Marchés additionnels foot uniquement (non couverts pour la Coupe du Monde dans tous les cas
-  // pour les marchés joueurs, mais BTTS/double chance sont des marchés "équipe", donc disponibles).
-  if (!isTennis) {
-    const btts = bk.markets?.find(m => m.key === "btts");
-    if (btts && btts.outcomes?.length === 2) {
-      out.push({ type: "Les deux équipes marquent (BTTS)", sels: btts.outcomes.map(o => o.name), odds: btts.outcomes.map(o => o.price) });
-    }
-    const dc = bk.markets?.find(m => m.key === "double_chance");
-    if (dc && dc.outcomes?.length === 3) {
-      out.push({ type: "Double chance", sels: dc.outcomes.map(o => o.name), odds: dc.outcomes.map(o => o.price), raw: true });
-    }
-    const dnb = bk.markets?.find(m => m.key === "draw_no_bet");
-    if (dnb && dnb.outcomes?.length === 2) {
-      out.push({ type: "Pari remboursé si match nul (Draw No Bet)", sels: dnb.outcomes.map(o => o.name), odds: dnb.outcomes.map(o => o.price) });
-    }
-    // Mi-temps (expérimental — pas garanti disponible en live, voir commentaire plus haut)
-    const h1 = bk.markets?.find(m => m.key === "h2h_h1");
-    if (h1) {
-      const home = h1.outcomes.find(o => o.name === ev.home_team);
-      const away = h1.outcomes.find(o => o.name === ev.away_team);
-      const draw = h1.outcomes.find(o => o.name === "Draw");
-      if (home && away && draw)
-        out.push({ type: "Résultat à la mi-temps", sels: [home.name, "Match nul", away.name], odds: [home.price, draw.price, away.price] });
-    }
-    const t1 = bk.markets?.find(m => m.key === "totals_h1");
-    if (t1 && t1.outcomes?.length >= 2) {
-      const over = t1.outcomes.find(o => /over/i.test(o.name));
-      const under = t1.outcomes.find(o => /under/i.test(o.name));
-      if (over && under) {
-        const pt = over.point ?? "";
-        out.push({ type: "Plus ou moins de buts en première mi-temps", sels: [`+${pt} but (1re MT)`, `-${pt} but (1re MT)`], odds: [over.price, under.price] });
-      }
+      out.push({ type: "Total sets", sels: [`+${pt} sets`, `-${pt} sets`], odds: [over.price, under.price] });
     }
   }
   return out;
 }
 
-// Score en direct : 1 crédit/appel (2 si on demandait l'historique, ce qu'on ne fait pas ici).
-// On ne l'appelle que pour "aujourd'hui" (day=0) — inutile de le payer pour les matchs de demain,
-// qui n'ont jamais de score. Fusion par id d'événement (le plus fiable, pas par nom d'équipe).
-async function fetchScores(key, apiKey) {
-  try {
-    const r = await fetch(`https://api.the-odds-api.com/v4/sports/${key}/scores/?apiKey=${apiKey}&dateFormat=iso`);
-    if (!r.ok) return [];
-    return await r.json();
-  } catch (_) { return []; }
-}
-function attachScores(matches, scoreEvents) {
-  if (!scoreEvents || !scoreEvents.length) return;
-  const byId = new Map(scoreEvents.map(s => [s.id, s]));
-  for (const m of matches) {
-    const s = byId.get(m.id);
-    if (!s || !s.scores) continue;
-    const hs = s.scores.find(x => x.name === m.home);
-    const as = s.scores.find(x => x.name === m.away);
-    if (hs && as) {
-      m.score = { home: Number(hs.score), away: Number(as.score) };
-      m.completed = !!s.completed;
-    }
+async function loadTennis(apiKey, day) {
+  const wantKey = parisDateKeyOffset(day);
+  const targets = await discoverTennisTargets(apiKey);
+  const result = {};
+  for (const { key, comp } of targets) {
+    try {
+      const r = await fetch(`https://api.the-odds-api.com/v4/sports/${key}/odds?apiKey=${apiKey}&regions=fr&oddsFormat=decimal&dateFormat=iso&markets=h2h,totals`);
+      if (!r.ok) continue;
+      const events = await r.json();
+      const matches = [];
+      for (const ev of events) {
+        if (parisDateKeyFromISO(ev.commence_time) !== wantKey) continue;
+        const markets = buildTennisMarkets(ev);
+        if (!markets.length) continue;
+        matches.push({ id: ev.id, home: ev.home_team, away: ev.away_team, time: parisTime(ev.commence_time), date: parisDateKeyFromISO(ev.commence_time), offset: day, markets });
+      }
+      if (matches.length) result[comp] = matches;
+    } catch (_) { /* ignore */ }
   }
+  return result;
 }
+
+/* ============================ Helpers dates (Europe/Paris) ============================ */
+
+function parisDateKeyFromISO(iso) {
+  return new Intl.DateTimeFormat("fr-CA", { timeZone: "Europe/Paris", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date(iso));
+}
+function parisTime(iso) {
+  return new Intl.DateTimeFormat("fr-FR", { timeZone: "Europe/Paris", hour: "2-digit", minute: "2-digit" }).format(new Date(iso));
+}
+function parisDateKeyOffset(day) {
+  const now = new Date();
+  const d = new Date(now.getTime() + (Number(day) || 0) * 24 * 3600 * 1000);
+  return parisDateKeyFromISO(d.toISOString());
+}
+
+/* ============================ Handler ============================ */
 
 export default async function handler(req, res) {
   res.setHeader("Access-Control-Allow-Origin", "*");
-  const apiKey = process.env.THE_ODDS_API_KEY;
-  if (!apiKey) return res.status(500).json({ error: "THE_ODDS_API_KEY manquante (variable d'env Vercel)." });
-
   const sport = (req.query.sport || "foot").toString();
-  const day = Number(req.query.day || 0); // 0 = aujourd'hui, 1 = demain
-  const isTennis = sport === "tennis";
-  const targets = isTennis ? await discoverTennisTargets(apiKey) : (SPORTS[sport] || []);
-  const { t0, t1 } = todayKeys();
-  const wantKey = day === 1 ? t1 : t0;
+  const day = Number(req.query.day || 0);
 
-  const result = {};
-  for (const { key, comp } of targets) {
-    // 3 paliers, du plus riche au plus sûr — on ne perd jamais ce qui marchait avant si un palier échoue.
-    const tiers = isTennis ? ["h2h,totals"] : [
-      "h2h,totals,btts,double_chance,draw_no_bet,h2h_h1,totals_h1", // tente aussi la mi-temps (expérimental)
-      "h2h,totals,btts,double_chance,draw_no_bet",                 // palier connu pour fonctionner
-      "h2h,totals",                                                 // base minimale, ne doit jamais échouer
-    ];
-    const baseUrl = `https://api.the-odds-api.com/v4/sports/${key}/odds`
-      + `?apiKey=${apiKey}&regions=fr&oddsFormat=decimal&dateFormat=iso&markets=`;
-    try {
-      let r, events;
-      for (const tier of tiers) {
-        r = await fetch(baseUrl + tier);
-        if (r.ok) { events = await r.json(); break; }
-      }
-      if (!r || !r.ok || !events) continue;  // compétition hors-saison / non couverte : on saute
-      const matches = [];
-      for (const ev of events) {
-        if (parisDateKey(ev.commence_time) !== wantKey) continue;
-        const markets = buildMarkets(ev, isTennis);
-        if (!markets.length) continue;
-        matches.push({
-          id: ev.id, home: ev.home_team, away: ev.away_team,
-          time: parisTime(ev.commence_time), date: parisDateKey(ev.commence_time), offset: day, markets,
-        });
-      }
-      if (matches.length) {
-        if (day === 0) {
-          const scoreEvents = await fetchScores(key, apiKey);
-          attachScores(matches, scoreEvents);
-        }
-        result[comp] = matches;
-      }
-    } catch (_) { /* on ignore une compétition en erreur */ }
+  try {
+    let result = {};
+    if (sport === "tennis") {
+      const k = process.env.THE_ODDS_API_KEY;
+      if (!k) return res.status(500).json({ error: "THE_ODDS_API_KEY manquante (env Vercel)." });
+      result = await loadTennis(k, day);
+    } else {
+      const k = process.env.API_FOOTBALL_KEY;
+      if (!k) return res.status(500).json({ error: "API_FOOTBALL_KEY manquante (env Vercel)." });
+      result = await loadFoot(k, day);
+    }
+    res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=300"); // limite la conso de quota
+    return res.status(200).json(result);
+  } catch (e) {
+    return res.status(500).json({ error: "Erreur de récupération des cotes." });
   }
-  res.setHeader("Cache-Control", "s-maxage=120, stale-while-revalidate=300"); // limite la conso de crédits
-  return res.status(200).json(result);
 }
