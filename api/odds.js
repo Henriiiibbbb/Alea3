@@ -68,24 +68,32 @@ function strengthOf(name) {
 
 /* ---------------- Modèle de Poisson ---------------- */
 
-const AVG_GOALS = 1.35;   // buts moyens par équipe / match (référence internationale)
-const REF = 75;           // note "moyenne" : une équipe à 75 ≈ multiplicateur 1
+const AVG_GOALS = 1.35;   // (conservé pour compat, non utilisé par le nouveau calcul)
+const REF = 75;           // note "moyenne"
 const MAXG = 8;           // buts max considérés par équipe
 const FACT = [1,1,2,6,24,120,720,5040,40320,362880];
 
+// Calibrage du modèle de supériorité (ÉDITABLE) :
+const GOAL_BASE = 2.6;    // buts totaux attendus de référence (deux équipes moyennes)
+const SENS = 7.5;         // sensibilité : SENS points d'écart de note = 1 but d'écart attendu (plus petit = favoris plus tranchés)
+const MAX_SUP = 2.8;      // écart de buts maximal (évite les valeurs absurdes sur gros mismatch)
+
 function poisson(k, lambda) { return Math.exp(-lambda) * Math.pow(lambda, k) / FACT[k]; }
 
-// Buts attendus de chaque équipe à partir des notes de force.
+// Buts attendus de chaque équipe — modèle de supériorité.
+// On déduit d'abord l'écart de buts attendu (supériorité) de l'écart de niveau, puis le total
+// attendu (un peu plus élevé si les deux équipes sont fortes), et on répartit.
 function expectedGoals(home, away) {
   const sh = strengthOf(home), sa = strengthOf(away);
-  const aH = sh / REF, dH = REF / sh;     // attaque / défense (multiplicateurs)
-  const aA = sa / REF, dA = REF / sa;
-  const hostAdv = HOSTS_2026.has(home) ? 1.08 : 1.0;
-  let lh = AVG_GOALS * aH * dA * hostAdv;
-  let la = AVG_GOALS * aA * dH;
-  // bornes raisonnables
-  lh = Math.min(Math.max(lh, 0.18), 4.2);
-  la = Math.min(Math.max(la, 0.18), 4.2);
+  const hostAdj = HOSTS_2026.has(home) ? 2.5 : 0;     // hôte qui "reçoit" : petit bonus de niveau
+  let sup = ((sh + hostAdj) - sa) / SENS;             // supériorité = écart de buts attendu
+  sup = Math.max(Math.min(sup, MAX_SUP), -MAX_SUP);
+  const avgStr = (sh + sa) / 2;
+  let tot = GOAL_BASE + (avgStr - REF) / 40;          // niveau moyen élevé -> un peu plus de buts
+  tot = Math.min(Math.max(tot, 1.8), 3.4);
+  let lh = (tot + sup) / 2, la = (tot - sup) / 2;
+  lh = Math.min(Math.max(lh, 0.15), 4.2);
+  la = Math.min(Math.max(la, 0.15), 4.2);
   return { lh, la };
 }
 
