@@ -289,6 +289,45 @@ export default async function handler(req, res) {
   const sport = (req.query.sport || "foot").toString();
   const day = Number(req.query.day || 0);
 
+  // --- Mode diagnostic temporaire : /api/odds?debug=1 ---
+  // Montre EXACTEMENT ce que renvoie API-Football (nb de matchs, nb de cotes, erreurs éventuelles),
+  // pour comprendre pourquoi la réponse est vide. À retirer une fois le souci compris.
+  if (req.query.debug) {
+    const k = process.env.API_FOOTBALL_KEY;
+    if (!k) return res.status(200).json({ debug: "API_FOOTBALL_KEY absente de l'env Vercel" });
+    const out = { keyPresent: true, today: parisDateKeyOffset(day), leagues: [] };
+    for (const { league, season, comp } of AF_LEAGUES) {
+      const url = `/fixtures?league=${league}&season=${season}&date=${parisDateKeyOffset(day)}&timezone=Europe/Paris`;
+      let fx = null, errTxt = null;
+      try {
+        const r = await fetch(`${AF_BASE}${url}`, { headers: afHeaders(k) });
+        const j = await r.json();
+        fx = j;
+      } catch (e) { errTxt = String(e); }
+      const entry = { comp, league, season,
+        httpOk: !errTxt,
+        nbFixtures: (fx && fx.response && fx.response.length) || 0,
+        apiErrors: fx && fx.errors,
+        firstFixture: fx && fx.response && fx.response[0]
+          ? { home: fx.response[0].teams?.home?.name, away: fx.response[0].teams?.away?.name, id: fx.response[0].fixture?.id, status: fx.response[0].fixture?.status?.short }
+          : null,
+      };
+      // Si un match existe, on teste tout de suite si ses cotes reviennent
+      if (entry.firstFixture) {
+        try {
+          const ro = await fetch(`${AF_BASE}/odds?fixture=${entry.firstFixture.id}&timezone=Europe/Paris`, { headers: afHeaders(k) });
+          const jo = await ro.json();
+          entry.oddsResults = (jo && jo.response && jo.response.length) || 0;
+          entry.oddsErrors = jo && jo.errors;
+          const bk = jo && jo.response && jo.response[0] && jo.response[0].bookmakers && jo.response[0].bookmakers[0];
+          entry.nbBetsFirstBookmaker = bk ? (bk.bets || []).length : 0;
+        } catch (e) { entry.oddsErr = String(e); }
+      }
+      out.leagues.push(entry);
+    }
+    return res.status(200).json(out);
+  }
+
   try {
     let result = {};
     if (sport === "tennis") {
