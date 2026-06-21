@@ -138,6 +138,10 @@
   .mlcomp{font-family:var(--mono);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--txt-dim);display:flex;align-items:center;gap:6px}
   .mlteams{font-family:var(--disp);font-weight:600;font-size:16px;margin-top:3px}
   .mlscore{display:inline-block;margin-top:5px;font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;color:var(--txt-dim);background:rgba(214,178,106,.10);border:1px solid rgba(214,178,106,.22);border-radius:6px;padding:2px 7px}
+  .topscore{display:flex;align-items:center;gap:10px;margin:2px 0 14px;padding:11px 14px;background:linear-gradient(90deg,rgba(214,178,106,.16),rgba(214,178,106,.05));border:1px solid rgba(214,178,106,.35);border-radius:12px}
+  .topscore .ts-lab{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-dim);flex:1}
+  .topscore .ts-val{font-family:var(--disp);font-weight:800;font-size:26px;color:var(--gold);line-height:1}
+  .topscore .ts-prob{font-family:var(--mono);font-size:10px;color:var(--txt-mut);text-align:right;white-space:nowrap}
   .mlteams .vs{color:var(--txt-dim);font-weight:400;margin:0 6px;font-size:12px}
   .mltime{font-family:var(--mono);font-size:12px;color:var(--gold);flex:none;white-space:nowrap}
   .mlrow .chev{font-size:20px;color:var(--txt-dim);flex:none;line-height:1}
@@ -578,7 +582,7 @@ function limitFamilies(list,maxPerFamily){
 }
 function buildPicksForMatch(match,category){
   const favSet=new Set(prof.favs);const meta=metaFor(match);
-  const all=cleanSelections(match).map(x=>({comp:match.comp,home:match.home,away:match.away,time:match.time,sel:x.sel,market:x.market,odd:x.odd,prob:x.prob,raw:x.raw,est:x.est,fav:favSet.has(x.market),note:(match.notes&&match.notes[x.sel])||'',meta,stats:match.stats||null}));
+  const all=cleanSelections(match).map(x=>({comp:match.comp,home:match.home,away:match.away,time:match.time,date:match.date,sel:x.sel,market:x.market,odd:x.odd,prob:x.prob,raw:x.raw,est:x.est,fav:favSet.has(x.market),note:(match.notes&&match.notes[x.sel])||'',meta,stats:match.stats||null}));
   const inCat=c=>x=>c==='sage'?x.prob>=CONFIG.SAGE_MIN:c==='normal'?(x.prob>=CONFIG.NORMAL_LOW&&x.prob<CONFIG.SAGE_MIN):(x.prob<=CONFIG.FUN_MAX&&x.prob>=0.04);
   const sortFn=(a,b)=>{if(a.fav!==b.fav)return a.fav?-1:1;return category==='fun'?b.odd-a.odd:b.prob-a.prob;};
   let cands=all.filter(inCat(category)).sort(sortFn);
@@ -616,9 +620,11 @@ function matchBlock(items,match){
   const picksHtml=items.length
     ? `<div class="picks"><div class="pl">Paris conseillés · « ${catLabel()} »</div>${items.map(pickRow).join('')}</div>`
     : `<div class="picks"><div class="empty" style="margin-top:2px"><b>Rien dans « ${catLabel()} » pour ce match.</b><br>Essaie une autre catégorie.</div></div>`;
+  const tsHtml=(state.sport!=='tennis'&&match.topScore&&st!=='done')
+    ? `<div class="topscore"><span class="ts-lab">Score exact le plus probable</span><span class="ts-val">${esc(match.topScore.label)}</span><span class="ts-prob">${Math.round(match.topScore.prob*100)} % · estimation Aléa</span></div>` : '';
   return `<article class="mblock" data-p="${state.category}">
     <div class="mb-top"><span class="m-comp">${esc(match.comp)}</span>${badge}<span class="m-time">${state.dayOffset?'Demain':'Auj.'} · ${match.time}</span></div>
-    <div class="mb-teams">${teams}</div>${analysisHtml}${trioHtml}
+    <div class="mb-teams">${teams}</div>${tsHtml}${analysisHtml}${trioHtml}
     ${picksHtml}</article>`;
 }
 function enc(o){return encodeURIComponent(JSON.stringify(o));}
@@ -883,7 +889,8 @@ async function askClaude(p,pct){
   const half=/mi-temps/i.test(p.market)?` Comme ce pari concerne la mi-temps, cherche spécifiquement si ${p.home} ou ${p.away} a tendance à marquer/encaisser plus en 1re ou en 2de période sur ses derniers matchs — c'est ça qui compte ici, pas juste la forme générale.`:'';
   const probSrc=p.est?`~${pct} % est une ESTIMATION de notre modèle maison (Poisson sur des notes de force d'équipe), PAS une cote de bookmaker`:`~${pct} % implicite (issu des cotes du marché)`;
   const user=`${sportTxt}, ${p.comp}, ${dayTxt} : ${p.home} contre ${p.away}. Sélection : "${p.sel}" (${p.market}), cote ≈ ${p.odd.toFixed(2)}, ${probSrc}. Pourquoi spécifiquement CE pari se tient, avec des chiffres concrets et son risque (recherche web).${half} ${p.est?`Précise honnêtement que ce pourcentage vient d'un modèle d'estimation, pas du marché.`:`Termine en rappelant que ces ~${pct} % sont l'avis du marché.`}`;
-  const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}]});
+  const cacheKey=`${state.sport}|${p.comp}|${p.home}|${p.away}|${p.date||p.time||''}|${p.market}|${p.sel}`.replace(/\s+/g,'_').slice(0,300);
+  const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}],__cacheKey:cacheKey});
   const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
   if(!text)throw new Error('empty');return text;
 }
