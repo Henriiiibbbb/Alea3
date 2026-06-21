@@ -71,7 +71,7 @@ function strengthOf(name) {
 const AVG_GOALS = 1.35;   // (conservé pour compat, non utilisé par le nouveau calcul)
 const REF = 75;           // note "moyenne"
 const MAXG = 8;           // buts max considérés par équipe
-const FACT = [1,1,2,6,24,120,720,5040,40320,362880];
+const FACT = [1,1,2,6,24,120,720,5040,40320,362880,3628800,39916800,479001600,6227020800,87178291200,1307674368000];
 
 // Calibrage du modèle de supériorité (ÉDITABLE) :
 const GOAL_BASE = 2.6;    // buts totaux attendus de référence (deux équipes moyennes)
@@ -105,65 +105,63 @@ function scoreMatrix(lh, la) {
 
 function toOdd(p) { if (p <= 0) return 999; return Math.min(Math.max(Math.round((1 / p) * 100) / 100, 1.02), 999); }
 
-// Construit tous les marchés dérivés du modèle pour un match.
-function modelMarkets(home, away) {
-  const { lh, la } = expectedGoals(home, away);
+// ---------- de-vig + ajustement du modèle aux VRAIES cotes ----------
+function devig(odds) { const inv = odds.map(o => 1 / o); const s = inv.reduce((a, b) => a + b, 0); return inv.map(x => x / s); }
+// P(total de buts > ligne) pour un total ~ Poisson(lT)
+function pOverTotal(line, lT) { let p = 0; for (let k = 0; k <= 15; k++) if (k > line) p += poisson(k, lT); return p; }
+// Cherche le total de buts attendu (lambda total) qui reproduit la vraie proba "over" du marché
+function fitLambdaTotal(line, pOver) { let lo = 0.2, hi = 6.5; for (let it = 0; it < 40; it++) { const mid = (lo + hi) / 2; if (pOverTotal(line, mid) < pOver) lo = mid; else hi = mid; } return (lo + hi) / 2; }
+// Répartit le total attendu entre les 2 équipes pour coller aux vraies probas 1X2 (home/away)
+function fitSplit(lT, pH, pA) {
+  let best = null;
+  for (let sup = -(lT - 0.2); sup <= (lT - 0.2); sup += 0.04) {
+    const lh = Math.max((lT + sup) / 2, 0.05), la = Math.max((lT - sup) / 2, 0.05);
+    let h = 0, d = 0, a = 0;
+    for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) { const p = poisson(i, lh) * poisson(j, la); if (i > j) h += p; else if (i === j) d += p; else a += p; }
+    const err = (h - pH) ** 2 + (a - pA) ** 2;
+    if (!best || err < best.err) best = { err, lh, la };
+  }
+  return best || { lh: lT / 2, la: lT / 2 };
+}
+
+// Marchés DÉRIVÉS du modèle (BTTS, double chance, score exact, mi-temps…), calés sur lh/la.
+// On NE remet PAS le 1X2 ni la ligne de total déjà fournie en VRAIE cote (skipTotalLine).
+function modelMarkets(home, away, lh, la, skipTotalLine) {
   const M = scoreMatrix(lh, la);
   let pH = 0, pD = 0, pA = 0, bttsY = 0;
-  const totalAtLeast = {}; // buts totaux
-  let oddTotal = 0, evenTotal = 0;
+  const totalAtLeast = {}; let oddTotal = 0, evenTotal = 0;
   let homeGoals0 = 0, homeGoals1 = 0, awayGoals0 = 0, awayGoals1 = 0;
   let bestS = { p: -1, i: 0, j: 0 };
   for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) {
     const p = M[i][j];
     if (i > j) pH += p; else if (i === j) pD += p; else pA += p;
     if (i >= 1 && j >= 1) bttsY += p;
-    const tot = i + j;
-    totalAtLeast[tot] = (totalAtLeast[tot] || 0) + p;
+    const tot = i + j; totalAtLeast[tot] = (totalAtLeast[tot] || 0) + p;
     if (tot % 2 === 0) evenTotal += p; else oddTotal += p;
-    if (i === 0) awayGoals0 += 0; // placeholder
     if (p > bestS.p) bestS = { p, i, j };
   }
-  // marges par équipe
   for (let i = 0; i <= MAXG; i++) { const ph = poisson(i, lh), pa = poisson(i, la);
-    if (i === 0) { homeGoals0 += ph; awayGoals0 += pa; }
-    if (i <= 1) { homeGoals1 += ph; awayGoals1 += pa; } }
-
-  // P(total > ligne)
+    if (i === 0) { homeGoals0 += ph; awayGoals0 += pa; } if (i <= 1) { homeGoals1 += ph; awayGoals1 += pa; } }
   const overOf = (line) => { let s = 0; for (const t in totalAtLeast) if (Number(t) > line) s += totalAtLeast[t]; return s; };
 
-  const out = [];
-  const est = true, raw = true;
-
-  // 1X2
-  out.push({ type: "1X2", sels: [home, "Match nul", away], odds: [toOdd(pH), toOdd(pD), toOdd(pA)], raw, est });
-  // Double chance
+  const out = []; const est = true, raw = true;
   out.push({ type: "Double chance", sels: [`${home} ou nul`, `${home} ou ${away}`, `nul ou ${away}`], odds: [toOdd(pH + pD), toOdd(pH + pA), toOdd(pD + pA)], raw, est });
-  // Totaux (plusieurs lignes)
-  for (const line of [1.5, 2.5, 3.5]) { const o = overOf(line); out.push({ type: "Total buts", sels: [`+${line} buts`, `-${line} buts`], odds: [toOdd(o), toOdd(1 - o)], raw, est }); }
-  // BTTS
+  for (const line of [1.5, 2.5, 3.5]) { if (skipTotalLine && Math.abs(line - skipTotalLine) < 0.01) continue; const o = overOf(line); out.push({ type: "Total buts", sels: [`+${line} buts`, `-${line} buts`], odds: [toOdd(o), toOdd(1 - o)], raw, est }); }
   out.push({ type: "Les deux équipes marquent (BTTS)", sels: ["Les deux équipes marquent", "Pas les deux"], odds: [toOdd(bttsY), toOdd(1 - bttsY)], raw, est });
-  // Pair / impair
   out.push({ type: "Nombre de buts pair / impair", sels: ["Nombre de buts pair", "Nombre de buts impair"], odds: [toOdd(evenTotal), toOdd(oddTotal)], raw, est });
-  // Buts par équipe (over/under 1.5)
   out.push({ type: `Buts de ${home}`, sels: [`${home} marque +1.5`, `${home} marque -1.5`], odds: [toOdd(1 - homeGoals1), toOdd(homeGoals1)], raw, est });
   out.push({ type: `Buts de ${away}`, sels: [`${away} marque +1.5`, `${away} marque -1.5`], odds: [toOdd(1 - awayGoals1), toOdd(awayGoals1)], raw, est });
-  // Une équipe garde sa cage inviolée
   out.push({ type: "Clean sheet", sels: [`${home} encaisse 0`, `${away} encaisse 0`], odds: [toOdd(awayGoals0), toOdd(homeGoals0)], raw, est });
 
-  // Mi-temps (≈45% des buts en 1re période, indépendance supposée)
-  const lh1 = lh * 0.45, la1 = la * 0.45;
-  const H = scoreMatrix(lh1, la1);
+  const lh1 = lh * 0.45, la1 = la * 0.45; const H = scoreMatrix(lh1, la1);
   let h1H = 0, h1D = 0, h1A = 0, h1Over05 = 0;
-  for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) { const p = H[i][j];
-    if (i > j) h1H += p; else if (i === j) h1D += p; else h1A += p; if (i + j >= 1) h1Over05 += p; }
+  for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) { const p = H[i][j]; if (i > j) h1H += p; else if (i === j) h1D += p; else h1A += p; if (i + j >= 1) h1Over05 += p; }
   out.push({ type: "Résultat à la mi-temps", sels: [home, "Match nul", away], odds: [toOdd(h1H), toOdd(h1D), toOdd(h1A)], raw, est });
   out.push({ type: "Plus ou moins de buts en première mi-temps", sels: ["+0.5 but (1re MT)", "-0.5 but (1re MT)"], odds: [toOdd(h1Over05), toOdd(1 - h1Over05)], raw, est });
-
-  // Score exact le plus probable (pari "fun")
   out.push({ type: "Score exact", sels: [`${bestS.i}-${bestS.j}`], odds: [toOdd(bestS.p)], raw, est });
 
-  return out;
+  // score exact le plus probable, renvoyé à part pour affichage à côté du match
+  return { markets: out, topScore: { label: `${bestS.i}-${bestS.j}`, prob: bestS.p } };
 }
 
 /* ---------------- Dates (Europe/Paris) ---------------- */
@@ -174,8 +172,8 @@ function parisDateKeyOffset(day) { const now = new Date(); const d = new Date(no
 
 /* ---------------- FOOT : fixtures (gratuit) + scores + modèle ---------------- */
 
-async function fetchEvents(key, apiKey) {
-  try { const r = await fetch(`${ODDS_BASE}/sports/${key}/events?apiKey=${apiKey}&dateFormat=iso`); if (!r.ok) return []; return await r.json(); }
+async function fetchFootOdds(key, apiKey) {
+  try { const r = await fetch(`${ODDS_BASE}/sports/${key}/odds?apiKey=${apiKey}&regions=fr&oddsFormat=decimal&dateFormat=iso&markets=h2h,totals`); if (!r.ok) return []; return await r.json(); }
   catch (_) { return []; }
 }
 async function fetchScores(key, apiKey) {
@@ -190,18 +188,61 @@ function attachScores(matches, scoreEvents) {
     if (hs && as) { m.score = { home: Number(hs.score), away: Number(as.score) }; m.completed = !!s.completed; } }
 }
 
+// Repli : aucune vraie cote -> 1X2 + dérivés issus du modèle (étiquetés estimation).
+function buildModelOnly(home, away, lh, la) {
+  const M = scoreMatrix(lh, la); let pH = 0, pD = 0, pA = 0;
+  for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) { const p = M[i][j]; if (i > j) pH += p; else if (i === j) pD += p; else pA += p; }
+  const x = { type: "1X2", sels: [home, "Match nul", away], odds: [toOdd(pH), toOdd(pD), toOdd(pA)], raw: true, est: true };
+  return [x, ...modelMarkets(home, away, lh, la, null).markets];
+}
+
+// Lit les VRAIES cotes 1X2 + total d'un événement (1er bookmaker), de-vig, et cale le modèle dessus.
+function buildHybrid(ev) {
+  const home = ev.home_team, away = ev.away_team;
+  const bk = (ev.bookmakers && ev.bookmakers[0]) || null;
+  const realMarkets = [];
+  let pH = null, pD = null, pA = null, line = null, pOver = null;
+
+  if (bk) {
+    const h2h = bk.markets?.find(m => m.key === "h2h");
+    if (h2h) {
+      const oH = h2h.outcomes.find(o => o.name === home)?.price;
+      const oD = h2h.outcomes.find(o => o.name === "Draw")?.price;
+      const oA = h2h.outcomes.find(o => o.name === away)?.price;
+      if (oH && oD && oA) { realMarkets.push({ type: "1X2", sels: [home, "Match nul", away], odds: [oH, oD, oA] }); const dv = devig([oH, oD, oA]); pH = dv[0]; pD = dv[1]; pA = dv[2]; }
+    }
+    const totals = bk.markets?.find(m => m.key === "totals");
+    if (totals && totals.outcomes?.length >= 2) {
+      const over = totals.outcomes.find(o => /over/i.test(o.name));
+      const under = totals.outcomes.find(o => /under/i.test(o.name));
+      if (over && under) { line = over.point; realMarkets.push({ type: "Total buts", sels: [`+${line} buts`, `-${line} buts`], odds: [over.price, under.price] }); pOver = devig([over.price, under.price])[0]; }
+    }
+  }
+
+  // Buts attendus : calés sur les vraies cotes si dispo, sinon repli sur les notes de force.
+  let lh, la;
+  if (pH != null && line != null && pOver != null) { const lT = fitLambdaTotal(line, pOver); const f = fitSplit(lT, pH, pA); lh = f.lh; la = f.la; }
+  else if (pH != null) { const f = fitSplit(2.6, pH, pA); lh = f.lh; la = f.la; }
+  else { const e = expectedGoals(home, away); lh = e.lh; la = e.la; }
+
+  if (pH == null) { const M = scoreMatrix(lh, la); const ms = buildModelOnly(home, away, lh, la); const top = modelMarkets(home, away, lh, la, null).topScore; return { home, away, markets: ms, topScore: top }; }
+
+  const { markets: derived, topScore } = modelMarkets(home, away, lh, la, line);
+  return { home, away, markets: [...realMarkets, ...derived], topScore };
+}
+
 async function loadFoot(apiKey, day) {
   const wantKey = parisDateKeyOffset(day);
   const result = {};
   for (const { key, comp } of FOOT_COMPS) {
-    const events = await fetchEvents(key, apiKey);   // 0 crédit
+    const events = await fetchFootOdds(key, apiKey); // 1 crédit / compétition
     if (!events.length) continue;
     const matches = [];
     for (const ev of events) {
       if (!ev.commence_time || parisDateKeyFromISO(ev.commence_time) !== wantKey) continue;
-      const home = ev.home_team, away = ev.away_team;
-      if (!home || !away) continue;
-      matches.push({ id: ev.id, home, away, time: parisTime(ev.commence_time), date: parisDateKeyFromISO(ev.commence_time), offset: day, markets: modelMarkets(home, away) });
+      if (!ev.home_team || !ev.away_team) continue;
+      const h = buildHybrid(ev);
+      matches.push({ id: ev.id, home: h.home, away: h.away, time: parisTime(ev.commence_time), date: parisDateKeyFromISO(ev.commence_time), offset: day, markets: h.markets, topScore: h.topScore });
     }
     if (!matches.length) continue;
     if (day === 0) attachScores(matches, await fetchScores(key, apiKey)); // 1 crédit
