@@ -43,6 +43,22 @@ async function kvIncr(key) {
   const j = await r.json();
   return parseInt(j.result, 10) || 0;
 }
+// Stocke une valeur (texte potentiellement long) via la commande SET d'Upstash en POST.
+async function kvSet(key, value) {
+  try {
+    await fetch(KV_URL, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${KV_TOKEN}`, "Content-Type": "application/json" },
+      body: JSON.stringify(["SET", key, value]),
+    });
+  } catch (_) { /* le cache est un bonus : on n'échoue jamais à cause de lui */ }
+}
+// Lit dépense + compteur courants (pour rafraîchir la jauge sans incrémenter).
+async function readBudget() {
+  const spent = parseFloat(await kvGet(`alea:spend:${monthKey()}`)) || 0;
+  const count = parseInt(await kvGet(`alea:count:${monthKey()}`), 10) || 0;
+  return { spent, count };
+}
 
 // Tarifs Sonnet 4.6 (juin 2026) : $3/M tokens entrée, $15/M sortie, recherche web $10/1000.
 function estimateCost(data) {
@@ -70,6 +86,22 @@ export default async function handler(req, res) {
 
   const payload = typeof req.body === "string" ? JSON.parse(req.body) : req.body;
   const cap = parseFloat(process.env.BUDGET_CAP_USD || "5");
+
+  // Clé de cache partagé (envoyée par le client pour le "Pourquoi détaillé" d'un pari donné).
+  // Si une analyse existe déjà pour CE pari, on la renvoie sans rappeler l'IA ni toucher au budget.
+  const cacheKey = payload && payload.__cacheKey ? String(payload.__cacheKey) : null;
+  if (payload) delete payload.__cacheKey; // ne jamais envoyer ce champ à Anthropic
+
+  if (cacheKey && kvEnabled) {
+    try {
+      const cached = await kvGet(`alea:whycache:${cacheKey}`);
+      if (cached != null && cached !== "") {
+        const b = await readBudget();
+        return res.status(200).json({ blocked: false, tracked: true, cached: true,
+          data: { content: [{ type: "text", text: cached }] }, spent: b.spent, count: b.count, cap });
+      }
+    } catch (_) { /* cache indispo : on génère normalement */ }
+  }
 
   // --- Vérification du budget AVANT d'appeler l'IA (si le suivi est actif) ---
   if (kvEnabled) {
@@ -112,6 +144,11 @@ export default async function handler(req, res) {
       kvIncrByFloat(spendKey, cost),
       kvIncr(countKey),
     ]);
+    // --- Stockage dans le cache partagé (si une clé a été fournie) ---
+    if (cacheKey) {
+      const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
+      if (text) await kvSet(`alea:whycache:${cacheKey}`, text);
+    }
     return res.status(200).json({ blocked: false, tracked: true, data, spent: newSpent, count: newCount, cap });
   } catch (e) {
     return res.status(502).json({ error: "Appel Anthropic échoué", detail: String(e) });
