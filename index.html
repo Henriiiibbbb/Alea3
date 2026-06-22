@@ -138,10 +138,18 @@
   .mlcomp{font-family:var(--mono);font-size:9.5px;letter-spacing:.07em;text-transform:uppercase;color:var(--txt-dim);display:flex;align-items:center;gap:6px}
   .mlteams{font-family:var(--disp);font-weight:600;font-size:16px;margin-top:3px}
   .mlscore{display:inline-block;margin-top:5px;font-family:var(--mono);font-size:9.5px;letter-spacing:.04em;color:var(--txt-dim);background:rgba(214,178,106,.10);border:1px solid rgba(214,178,106,.22);border-radius:6px;padding:2px 7px}
-  .topscore{display:flex;align-items:center;gap:10px;margin:2px 0 14px;padding:11px 14px;background:linear-gradient(90deg,rgba(214,178,106,.16),rgba(214,178,106,.05));border:1px solid rgba(214,178,106,.35);border-radius:12px}
+  .topscore{margin:2px 0 14px;padding:12px 14px;background:linear-gradient(180deg,rgba(214,178,106,.14),rgba(214,178,106,.04));border:1px solid rgba(214,178,106,.32);border-radius:12px}
+  .topscore .ts-head{display:flex;align-items:center;gap:8px;margin-bottom:10px}
   .topscore .ts-lab{font-family:var(--mono);font-size:9.5px;letter-spacing:.06em;text-transform:uppercase;color:var(--txt-dim);flex:1}
-  .topscore .ts-val{font-family:var(--disp);font-weight:800;font-size:26px;color:var(--gold);line-height:1}
-  .topscore .ts-prob{font-family:var(--mono);font-size:10px;color:var(--txt-mut);text-align:right;white-space:nowrap}
+  .topscore .ts-tag{font-family:var(--mono);font-size:8.5px;letter-spacing:.05em;text-transform:uppercase;color:var(--gold);border:1px solid rgba(214,178,106,.4);border-radius:999px;padding:2px 7px}
+  .topscore .ts-row{display:flex;gap:10px}
+  .topscore .ts-chip{flex:1;display:flex;flex-direction:column;align-items:center;gap:2px;padding:8px 4px;background:var(--ink-2);border:1px solid var(--line);border-radius:10px}
+  .topscore .ts-chip.first{border-color:rgba(214,178,106,.55);background:rgba(214,178,106,.1)}
+  .topscore .ts-chip .ts-val{font-family:var(--disp);font-weight:800;font-size:22px;color:var(--gold);line-height:1}
+  .topscore .ts-chip .ts-prob{font-family:var(--mono);font-size:10px;color:var(--txt-mut)}
+  .topscore .ts-refine{width:100%;margin-top:11px;background:var(--ink-2);border:1px solid rgba(214,178,106,.35);color:var(--gold);border-radius:10px;padding:9px;font-size:12.5px;font-family:var(--body)}
+  .topscore .ts-ai{font-size:13.5px;color:var(--txt-dim);line-height:1.5}
+  .topscore .ts-ai p{margin:9px 2px 0}
   .mlteams .vs{color:var(--txt-dim);font-weight:400;margin:0 6px;font-size:12px}
   .mltime{font-family:var(--mono);font-size:12px;color:var(--gold);flex:none;white-space:nowrap}
   .mlrow .chev{font-size:20px;color:var(--txt-dim);flex:none;line-height:1}
@@ -644,8 +652,14 @@ function matchBlock(items,match){
   const picksHtml=items.length
     ? `<div class="picks"><div class="pl">Paris conseillés · « ${catLabel()} »</div>${items.map(pickRow).join('')}</div>`
     : `<div class="picks"><div class="empty" style="margin-top:2px"><b>Rien dans « ${catLabel()} » pour ce match.</b><br>Essaie une autre catégorie.</div></div>`;
-  const tsHtml=(state.sport!=='tennis'&&match.topScore&&st!=='done')
-    ? `<div class="topscore"><span class="ts-lab">Score exact le plus probable</span><span class="ts-val">${esc(match.topScore.label)}</span><span class="ts-prob">${Math.round(match.topScore.prob*100)} % · estimation Aléa</span></div>` : '';
+  const tsList=(state.sport!=='tennis'&&st!=='done')?(match.topScores&&match.topScores.length?match.topScores:(match.topScore?[match.topScore]:[])):[];
+  const tsHtml=tsList.length
+    ? `<div class="topscore">
+        <div class="ts-head"><span class="ts-lab">Scores exacts les plus probables</span><span class="ts-tag">estimation Aléa</span></div>
+        <div class="ts-row">${tsList.map((s,i)=>`<div class="ts-chip${i===0?' first':''}"><span class="ts-val">${esc(s.label)}</span><span class="ts-prob">${Math.round(s.prob*100)}%</span></div>`).join('')}</div>
+        <button class="ts-refine" data-scorekey="${esc(match.home+'|'+match.away)}">✦ Affiner avec la forme récente</button>
+        <div class="ts-ai" id="tsAi"></div>
+      </div>` : '';
   return `<article class="mblock" data-p="${state.category}">
     <div class="mb-top"><span class="m-comp">${esc(match.comp)}</span>${badge}<span class="m-time">${state.dayOffset?'Demain':'Auj.'} · ${match.time}</span></div>
     <div class="mb-teams">${teams}</div>${tsHtml}${analysisHtml}${trioHtml}
@@ -932,8 +946,27 @@ async function analyzeCustom(o,idea,heur){
 document.addEventListener('click',e=>{
   const ml=e.target.closest('[data-matchkey]');if(ml){state.matchKey=ml.dataset.matchkey;show('matchview');renderMatchDetail();return;}
   const b=e.target.closest('[data-why]');if(b){openWhy(JSON.parse(decodeURIComponent(b.dataset.why)));return;}
-  const r=e.target.closest('[data-refresh]');if(r){e.stopPropagation();refreshInfos(r.dataset.refresh,r);}
+  const r=e.target.closest('[data-refresh]');if(r){e.stopPropagation();refreshInfos(r.dataset.refresh,r);return;}
+  const sc=e.target.closest('[data-scorekey]');if(sc){e.stopPropagation();refineScore(sc.dataset.scorekey,sc);return;}
 });
+// Affine le score exact via l'IA (forme récente + contexte), mis en cache partagé (payé une fois).
+async function refineScore(key,btn){
+  const m=lastMatchByKey[key];if(!m)return;
+  const out=document.getElementById('tsAi');
+  btn.disabled=true;const old=btn.textContent;btn.innerHTML='<span class="dots"><i></i><i></i><i></i></span> recherche de la forme récente…';
+  const sys=`Tu es un analyste foot, façon trader/quant. En t'appuyant sur la FORME RÉCENTE (5 derniers matchs de chaque équipe), le CONTEXTE (phase de poules de la Coupe du Monde 2026, enjeu de qualification, style de jeu, absences) et les confrontations, propose les 2 ou 3 SCORES EXACTS les plus crédibles, du plus probable au moins probable, avec pour chacun une justification chiffrée courte (forme, buts marqués/encaissés récents). Recherche web pour des infos à jour. Sois honnête : le score exact est le pari le plus difficile (faible probabilité), dis-le. Français, concis, pas de liste à puces interminable : 1 phrase de contexte puis les scores avec justif. Pas de titres en gras.`;
+  const user=`${m.comp}, phase de poules : ${m.home} contre ${m.away}, ${m.offset?'demain':"aujourd'hui"}. Quels scores exacts sont les plus crédibles vu la forme récente et le contexte ? Justifie avec des chiffres récents.`;
+  const cacheKey=`scorepred|${m.comp}|${m.home}|${m.away}|${m.date||''}`.replace(/\s+/g,'_').slice(0,300);
+  try{
+    const data=await callAI({model:'claude-sonnet-4-6',max_tokens:700,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}],__cacheKey:cacheKey,__action:'why'});
+    const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+    if(out)out.innerHTML=`<div class="ai-badge" style="margin-top:11px">✦ score selon la forme récente</div>`+mdToHtml(text||'Pas d\'info exploitable.');
+    btn.style.display='none';
+  }catch(err){
+    if(err&&err.budget){if(out)out.innerHTML=`<div class="disclaim" style="color:var(--fun);margin-top:10px">⚠ Budget IA du mois atteint (${err.spent.toFixed(2)} $ / ${err.cap} $).</div>`;}
+    else{btn.disabled=false;btn.textContent=old;if(out)out.innerHTML='<p style="color:var(--fun)">Analyse impossible, réessaie.</p>';}
+  }
+}
 function statBlock(p,pct){const lab=p.est?'estimation Aléa':p.raw?'proba (cote)':'proba marché';return `<div class="factline"><div class="stat"><div class="sl">cote ≈</div><div class="sv" style="color:var(--gold)">${p.odd.toFixed(2)}</div></div><div class="stat"><div class="sl">${lab}</div><div class="sv">${pct} %</div></div><div class="stat"><div class="sl">soit 1 sur</div><div class="sv">${(1/p.prob).toFixed(1)}</div></div></div>`;}
 function disclaimer(pct,est){return `<div class="disclaim"><b>Rappel.</b> ${est?`Ces ${pct} % sont une <i>estimation de notre modèle Aléa</i> (calcul de probabilités maison), pas une cote de bookmaker ni une certitude.`:`Ces ${pct} % sont l'avis du <i>marché</i>, pas une certitude — il se trompe souvent, c'est là qu'est la value.`} Rien ici n'est une garantie de gain.</div>`;}
 function openWhy(p){
