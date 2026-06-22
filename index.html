@@ -292,11 +292,28 @@
 
   <section class="custom" id="customView" hidden>
     <h2>Mon pari personnalisé</h2>
-    <p class="lead">Décris ton idée de pari : cote estimée, probabilité et analyse façon analyste sportif.</p>
-    <div class="field"><label for="cMatch">Match</label><select id="cMatch"></select></div>
-    <div class="field"><label for="cText">Ton idée de pari</label><textarea id="cText" rows="3" placeholder="ex : Plus de 3,5 buts · Score exact 2-1 · BTTS + victoire États-Unis"></textarea></div>
-    <div style="display:flex;gap:10px;margin-top:14px"><button class="btn ghost" id="cBack">Retour</button><button class="btn" id="cRun" style="flex:1">Analyser mon pari</button></div>
-    <div id="cResult"></div>
+    <div style="display:flex;gap:8px;margin-bottom:14px">
+      <button class="btn ghost" id="cTabIdeaBtn" style="flex:1" aria-pressed="true">✎ Mon idée</button>
+      <button class="btn ghost" id="cTabBetifyBtn" style="flex:1" aria-pressed="false">📸 Betify (photos)</button>
+    </div>
+
+    <div id="cIdeaPanel">
+      <p class="lead">Décris ton idée de pari : cote estimée, probabilité et analyse façon analyste sportif.</p>
+      <div class="field"><label for="cMatch">Match</label><select id="cMatch"></select></div>
+      <div class="field"><label for="cText">Ton idée de pari</label><textarea id="cText" rows="3" placeholder="ex : Plus de 3,5 buts · Score exact 2-1 · BTTS + victoire États-Unis"></textarea></div>
+      <div style="display:flex;gap:10px;margin-top:14px"><button class="btn ghost" id="cBack">Retour</button><button class="btn" id="cRun" style="flex:1">Analyser mon pari</button></div>
+      <div id="cResult"></div>
+    </div>
+
+    <div id="cBetifyPanel" hidden>
+      <p class="lead">Ajoute jusqu'à 6 captures de la page <b>statistiques</b> Betify. L'IA les lit et fait ressortir les tendances qui reviennent souvent, y compris les marchés de niche.</p>
+      <input id="cPhotos" type="file" accept="image/*" multiple style="display:none" />
+      <button class="btn ghost full" id="cAddPhotos" style="margin-bottom:10px">＋ Ajouter des captures (0/6)</button>
+      <div id="cThumbs" style="display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px"></div>
+      <div class="field"><label for="cBetifyNote">Ce que tu cherches (optionnel)</label><input id="cBetifyNote" type="text" placeholder="ex : tendances buts/corners, ou laisse vide pour tout" /></div>
+      <div style="display:flex;gap:10px;margin-top:6px"><button class="btn ghost" id="cBack2">Retour</button><button class="btn" id="cBetifyRun" style="flex:1">Analyser les captures</button></div>
+      <div id="cBetifyResult"></div>
+    </div>
   </section>
 
   <section class="board" id="board" hidden>
@@ -476,8 +493,15 @@ const CONFIG={ SAGE_MIN:0.62, NORMAL_LOW:0.40, FUN_MAX:0.33, MAX_PICKS:8, MIN_PE
 const state={ sport:null, dayOffset:0, category:'sage', live:false, matchKey:null };
 let prof={ firstName:'', username:'', favs:[] };
 
-function loadProf(){try{const r=Store.get('alea_profile');if(r){const p=JSON.parse(r);prof.firstName=p.firstName||'';prof.username=p.username||'';prof.favs=Array.isArray(p.favs)?p.favs:[];}}catch(e){}}
-function saveProf(){Store.set('alea_profile',JSON.stringify(prof));}
+function cookieSet(k,v){try{document.cookie=`${k}=${encodeURIComponent(v)};path=/;max-age=31536000;SameSite=Lax`;}catch(e){}}
+function cookieGet(k){try{const m=document.cookie.match(new RegExp('(?:^|; )'+k+'=([^;]*)'));return m?decodeURIComponent(m[1]):null;}catch(e){return null;}}
+function loadProf(){
+  let r=null;
+  try{r=Store.get('alea_profile');}catch(e){}
+  if(!r)r=cookieGet('alea_profile'); // secours si le stockage local est bloqué/effacé
+  if(r){try{const p=JSON.parse(r);prof.firstName=p.firstName||'';prof.username=p.username||'';prof.favs=Array.isArray(p.favs)?p.favs:[];}catch(e){}}
+}
+function saveProf(){const v=JSON.stringify(prof);Store.set('alea_profile',v);cookieSet('alea_profile',v);}
 function hasProfile(){return !!(prof.firstName||prof.username);}
 function hasPrefs(){return prof.favs.length>0;}
 
@@ -782,10 +806,69 @@ $('reloadBtn').onclick=async()=>{
 /* ===== MON PARI PERSONNALISÉ ===== */
 $('goCustom').onclick=()=>openCustom();
 $('cBack').onclick=()=>{refreshHome();show('home');};
+$('cBack2').onclick=()=>{refreshHome();show('home');};
 $('cRun').onclick=runCustom;
 
+// --- Onglets Idée / Betify ---
+function setCustomTab(tab){
+  const idea=tab==='idea';
+  $('cIdeaPanel').hidden=!idea;$('cBetifyPanel').hidden=idea;
+  $('cTabIdeaBtn').setAttribute('aria-pressed',String(idea));
+  $('cTabBetifyBtn').setAttribute('aria-pressed',String(!idea));
+}
+$('cTabIdeaBtn').onclick=()=>setCustomTab('idea');
+$('cTabBetifyBtn').onclick=()=>setCustomTab('betify');
+
+// --- Photos Betify (jusqu'à 6, redimensionnées pour limiter le coût IA) ---
+let betifyPhotos=[]; // { dataUrl, media_type, b64 }
+$('cAddPhotos').onclick=()=>$('cPhotos').click();
+$('cPhotos').onchange=async(e)=>{
+  const files=[...(e.target.files||[])];
+  for(const f of files){
+    if(betifyPhotos.length>=6)break;
+    try{const img=await downscaleImage(f,1280,0.72);betifyPhotos.push(img);}catch(err){}
+  }
+  $('cPhotos').value='';renderThumbs();
+};
+function renderThumbs(){
+  $('cAddPhotos').textContent=`＋ Ajouter des captures (${betifyPhotos.length}/6)`;
+  $('cThumbs').innerHTML=betifyPhotos.map((p,i)=>`<div style="position:relative"><img src="${p.dataUrl}" style="width:72px;height:72px;object-fit:cover;border-radius:8px;border:1px solid var(--line)"/><button data-rm="${i}" style="position:absolute;top:-7px;right:-7px;width:22px;height:22px;border-radius:50%;background:var(--fun);color:#fff;border:none;font-size:13px;line-height:1">×</button></div>`).join('');
+  $('cThumbs').querySelectorAll('[data-rm]').forEach(b=>b.onclick=()=>{betifyPhotos.splice(+b.dataset.rm,1);renderThumbs();});
+}
+// Redimensionne une image (max maxDim px) et renvoie JPEG base64 — réduit fortement le coût en tokens.
+function downscaleImage(file,maxDim,quality){
+  return new Promise((resolve,reject)=>{
+    const r=new FileReader();
+    r.onload=()=>{const img=new Image();img.onload=()=>{
+      let{width:w,height:h}=img;if(w>h&&w>maxDim){h=Math.round(h*maxDim/w);w=maxDim;}else if(h>maxDim){w=Math.round(w*maxDim/h);h=maxDim;}
+      const c=document.createElement('canvas');c.width=w;c.height=h;c.getContext('2d').drawImage(img,0,0,w,h);
+      const dataUrl=c.toDataURL('image/jpeg',quality);resolve({dataUrl,media_type:'image/jpeg',b64:dataUrl.split(',')[1]});
+    };img.onerror=reject;img.src=r.result;};
+    r.onerror=reject;r.readAsDataURL(file);
+  });
+}
+async function runBetify(){
+  if(!betifyPhotos.length){$('cBetifyResult').innerHTML='<div class="disclaim">Ajoute au moins une capture.</div>';return;}
+  const note=$('cBetifyNote').value.trim();
+  const btn=$('cBetifyRun');btn.disabled=true;const old=btn.textContent;btn.innerHTML='<span class="dots"><i></i><i></i><i></i></span> analyse…';
+  $('cBetifyResult').innerHTML='';
+  const sys=`Tu es un analyste paris sportifs honnête, façon trader/quant. On te donne une ou plusieurs captures de la page STATISTIQUES de Betify. Lis attentivement les chiffres visibles et fais ressortir : 1) les tendances solides qui reviennent souvent ; 2) les marchés de NICHE sous-estimés auxquels on ne pense pas (corners, cartons, mi-temps, tirs, etc.) mais qui ressortent ; 3) si plusieurs matchs, ce qui revient sur (presque) tous. Appuie-toi UNIQUEMENT sur les chiffres lus sur les images, cite-les. Français, clair, 150-220 mots, paragraphes courts (pas de longue liste). Si une image est illisible ou une donnée absente, dis-le honnêtement. Termine par : une tendance passée n'est pas une garantie.`;
+  const content=betifyPhotos.map(p=>({type:'image',source:{type:'base64',media_type:p.media_type,data:p.b64}}));
+  content.push({type:'text',text:`Analyse ces ${betifyPhotos.length} capture(s) de stats Betify et sors les tendances marquantes${note?` (focus : ${note})`:''}. Cite les chiffres vus.`});
+  try{
+    const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content}],__action:'betify'});
+    const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
+    $('cBetifyResult').innerHTML=`<div class="resultcard"><div class="ai-badge">✦ tendances Betify</div>${mdToHtml(text||'Rien d\'exploitable lu sur les images.')}<div class="disclaim"><b>Rappel.</b> Tendances lues sur tes captures, pas une garantie de gain. 18+.</div></div>`;
+  }catch(err){
+    if(err&&err.budget){$('cBetifyResult').innerHTML=`<div class="disclaim" style="color:var(--fun)">⚠ Budget IA du mois atteint (${err.spent.toFixed(2)} $ / ${err.cap} $).</div>`;}
+    else{$('cBetifyResult').innerHTML='<div class="disclaim">Analyse impossible pour l\'instant, réessaie.</div>';}
+  }finally{btn.disabled=false;btn.textContent=old;}
+}
+$('cBetifyRun').onclick=runBetify;
+
 async function openCustom(){
-  show('custom');$('cMatch').innerHTML='<option>Chargement…</option>';$('cResult').innerHTML='';
+  show('custom');setCustomTab('idea');betifyPhotos=[];renderThumbs();$('cBetifyResult').innerHTML='';$('cBetifyNote').value='';
+  $('cMatch').innerHTML='<option>Chargement…</option>';$('cResult').innerHTML='';
   const opts=[];
   for(const sport of ['foot','tennis'])for(const off of [0,1]){
     const data=await loadData(sport,off);
@@ -816,7 +899,7 @@ async function analyzeCustom(o,idea,heur){
   const sys=`Tu es un analyste paris sportifs honnête, façon trader/quant. Jamais "va passer"/"sûr"/"garanti". Réponds UNIQUEMENT en JSON valide : {"cote":number,"proba":number(0-1),"analyse":"2-3 phrases avec des chiffres concrets","pour":["force 1","force 2"],"risques":["faiblesse 1","faiblesse 2"],"value":"verdict en 1 phrase : compare ta proba estimée à la cote implicite. Si ta proba > 1/cote du marché → value positive ; sinon → pas de value. Sois explicite."}. Sois concret (stats, forme, contexte récent). Si donnée inconnue, estime prudemment.`;
   const user=`Match (${o.sport==='tennis'?'tennis':'football'}, ${o.comp}) : ${o.home} contre ${o.away}. Pari : "${idea}". ${heur?`Départ interne : cote ≈ ${heur.odd}, proba ≈ ${(heur.prob*100).toFixed(0)}%.`:''} Donne cote, probabilité, analyse chiffrée, points pour et risques. Recherche web pour forme/blessures récentes.`;
   try{
-    const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}]});
+    const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}],__action:'custom'});
     let text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim().replace(/```json|```/g,'').trim();
     const j=JSON.parse(text);const badge=$('cBadge');if(badge)badge.outerHTML=`<div class="ai-badge">✦ analyse détaillée</div>`;
     const rc=document.querySelector('#cResult .rc-stats');if(rc&&(j.cote||j.proba))rc.innerHTML=`<div class="rc-stat"><div class="l">cote estimée</div><div class="v" style="color:var(--gold)">≈${Number(j.cote||(heur&&heur.odd)||0).toFixed(2)}</div></div><div class="rc-stat"><div class="l">probabilité</div><div class="v">${Math.round((j.proba||(heur&&heur.prob)||0)*100)} %</div></div><div class="rc-stat"><div class="l">source</div><div class="v" style="font-size:12px">IA + web</div></div>`;
@@ -875,8 +958,13 @@ class BudgetBlockedError extends Error{constructor(spent,cap){super('budget');th
 // Appelle l'IA via notre proxy (avec suivi de budget) ou en direct (aperçu Claude.ai, sans suivi possible).
 async function callAI(body){
   const direct=CONFIG.WHY_ENDPOINT.startsWith('http');
+  if(direct){
+    const clean={...body};delete clean.__cacheKey;delete clean.__action;delete clean.__uid;delete clean.__name;
+    const res=await fetch(CONFIG.WHY_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(clean)});
+    if(!res.ok)throw new Error('api '+res.status); return await res.json();
+  }
+  body.__uid=prof.username||prof.firstName||'';body.__name=prof.firstName||'';
   const res=await fetch(CONFIG.WHY_ENDPOINT,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)});
-  if(direct){ if(!res.ok)throw new Error('api '+res.status); return await res.json(); }
   const json=await res.json();
   if(json.blocked){ refreshBudgetUI(json); throw new BudgetBlockedError(json.spent,json.cap); }
   if(json.tracked) refreshBudgetUI(json);
@@ -890,7 +978,7 @@ async function askClaude(p,pct){
   const probSrc=p.est?`~${pct} % est une ESTIMATION de notre modèle maison (Poisson sur des notes de force d'équipe), PAS une cote de bookmaker`:`~${pct} % implicite (issu des cotes du marché)`;
   const user=`${sportTxt}, ${p.comp}, ${dayTxt} : ${p.home} contre ${p.away}. Sélection : "${p.sel}" (${p.market}), cote ≈ ${p.odd.toFixed(2)}, ${probSrc}. Pourquoi spécifiquement CE pari se tient, avec des chiffres concrets et son risque (recherche web).${half} ${p.est?`Précise honnêtement que ce pourcentage vient d'un modèle d'estimation, pas du marché.`:`Termine en rappelant que ces ~${pct} % sont l'avis du marché.`}`;
   const cacheKey=`${state.sport}|${p.comp}|${p.home}|${p.away}|${p.date||p.time||''}|${p.market}|${p.sel}`.replace(/\s+/g,'_').slice(0,300);
-  const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}],__cacheKey:cacheKey});
+  const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}],__cacheKey:cacheKey,__action:'why'});
   const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
   if(!text)throw new Error('empty');return text;
 }
@@ -900,7 +988,7 @@ async function refreshInfos(key,btn){
   const sys=`Tu es un analyste sportif. Donne les DERNIÈRES infos vérifiables (blessures, compos probables, suspensions, météo, enjeux) pouvant impacter ce match. Français, factuel, 3-5 puces courtes préfixées "• ". Pas d'invention : si rien de neuf, dis-le.`;
   const user=`${m.comp} : ${m.home} contre ${m.away}, ${m.offset?'demain':"aujourd'hui"} ${m.time}. Dernières infos d'avant-match (recherche web).`;
   try{
-    const data=await callAI({model:'claude-sonnet-4-6',max_tokens:800,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}]});
+    const data=await callAI({model:'claude-sonnet-4-6',max_tokens:800,system:sys,messages:[{role:'user',content:user}],tools:[{type:'web_search_20250305',name:'web_search'}],__action:'infos'});
     const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();if(!text)throw 0;
     an.innerHTML=`<div class="an-row"><span class="k">Dernières infos (live web)</span><span class="v">${esc(text).replace(/\n/g,'<br>')}</span></div>`+old;
   }catch(e){
@@ -925,7 +1013,7 @@ function openAdmin(){
   let ov=$('adminOverlay');
   if(!ov){
     ov=document.createElement('div');ov.id='adminOverlay';
-    ov.style.cssText='position:fixed;inset:0;z-index:200;background:rgba(8,10,14,.97);overflow:auto;padding:calc(env(safe-area-inset-top) + 18px) 16px 24px;font-family:var(--body)';
+    ov.style.cssText='position:fixed;inset:0;z-index:200;background:rgba(8,10,14,.97);overflow:auto;display:flex;flex-direction:column;justify-content:center;padding:calc(env(safe-area-inset-top) + 18px) 16px 24px;font-family:var(--body)';
     const keyStyle='width:74px;height:74px;border-radius:50%;border:1px solid var(--line);background:var(--ink-2);color:var(--txt);font-family:var(--disp);font-size:28px;font-weight:600;display:flex;align-items:center;justify-content:center';
     ov.innerHTML=`<div style="max-width:420px;margin:0 auto">
       <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
@@ -969,10 +1057,11 @@ function loadAdminList(code){
     const fmt=d=>{try{return new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}};
     box.style.textAlign='left';
     box.innerHTML=`<div style="color:var(--gold);font-family:var(--mono);font-size:12px;margin:8px 0 10px">${j.total} inscrit${j.total>1?'s':''}</div>`+
-      j.users.map(u=>`<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">
+      j.users.map(u=>{const a=u.act||{};const spend=u.spend?` · ${u.spend.toFixed(2)} $`:'';return `<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">
         <div style="font-family:var(--disp);font-weight:700;font-size:15px;color:var(--txt)">${esc(u.firstName||'—')} <span style="color:var(--txt-mut);font-weight:400">@${esc(u.username||'—')}</span></div>
         <div style="font-family:var(--mono);font-size:10.5px;color:var(--txt-mut);margin-top:4px">inscrit ${fmt(u.firstSeen)} · vu ${fmt(u.lastSeen)} · ${u.visits||1} visite${(u.visits||1)>1?'s':''}</div>
-      </div>`).join('');
+        <div style="font-family:var(--mono);font-size:10.5px;color:var(--gold);margin-top:5px">${a.whyGen||0} analyses générées${spend} · ${a.whyCache||0} via cache · ${a.custom||0} paris perso · ${a.betify||0} Betify · ${a.infos||0} infos</div>
+      </div>`;}).join('');
   }).catch(()=>{box.textContent='Erreur réseau.';});
 }
 function checkAdminHash(){if(location.hash==='#admin')openAdmin();}
