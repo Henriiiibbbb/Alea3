@@ -53,6 +53,33 @@ async function kvSet(key, value) {
     });
   } catch (_) { /* le cache est un bonus : on n'échoue jamais à cause de lui */ }
 }
+async function kvCmd(args) {
+  try {
+    const r = await fetch(KV_URL, { method: "POST", headers: { Authorization: `Bearer ${KV_TOKEN}`, "Content-Type": "application/json" }, body: JSON.stringify(args) });
+    if (!r.ok) return null; const j = await r.json(); return j.result;
+  } catch (_) { return null; }
+}
+// Incrémente les compteurs d'activité d'un utilisateur (par pseudo), pour la page admin.
+// field ∈ { whyGen, whyCache, custom, infos } ; addSpend = coût $ à ajouter à cet utilisateur.
+async function bumpUser(uid, name, field, addSpend) {
+  if (!uid) return;
+  const id = String(uid).toLowerCase().slice(0, 40);
+  try {
+    await kvCmd(["SADD", "alea:users", id]);
+    let rec = {};
+    try { const raw = await kvGet(`alea:user:${id}`); if (raw) rec = JSON.parse(raw); } catch (_) {}
+    const now = new Date().toISOString();
+    rec.username = rec.username || String(uid).slice(0, 40);
+    if (name) rec.firstName = rec.firstName || String(name).slice(0, 40);
+    rec.firstSeen = rec.firstSeen || now;
+    rec.lastSeen = now;
+    rec.visits = rec.visits || 0;
+    rec.act = rec.act || { whyGen: 0, whyCache: 0, custom: 0, infos: 0, betify: 0 };
+    if (field) rec.act[field] = (rec.act[field] || 0) + 1;
+    if (addSpend) rec.spend = Math.round(((rec.spend || 0) + addSpend) * 1e4) / 1e4;
+    await kvSet(`alea:user:${id}`, JSON.stringify(rec));
+  } catch (_) { /* le suivi est un bonus : ne jamais bloquer l'IA */ }
+}
 // Lit dépense + compteur courants (pour rafraîchir la jauge sans incrémenter).
 async function readBudget() {
   const spent = parseFloat(await kvGet(`alea:spend:${monthKey()}`)) || 0;
@@ -90,12 +117,16 @@ export default async function handler(req, res) {
   // Clé de cache partagé (envoyée par le client pour le "Pourquoi détaillé" d'un pari donné).
   // Si une analyse existe déjà pour CE pari, on la renvoie sans rappeler l'IA ni toucher au budget.
   const cacheKey = payload && payload.__cacheKey ? String(payload.__cacheKey) : null;
-  if (payload) delete payload.__cacheKey; // ne jamais envoyer ce champ à Anthropic
+  const uid = payload && payload.__uid ? String(payload.__uid) : "";
+  const uname = payload && payload.__name ? String(payload.__name) : "";
+  const action = payload && payload.__action ? String(payload.__action) : "why";
+  if (payload) { delete payload.__cacheKey; delete payload.__uid; delete payload.__name; delete payload.__action; } // ne jamais envoyer ces champs à Anthropic
 
   if (cacheKey && kvEnabled) {
     try {
       const cached = await kvGet(`alea:whycache:${cacheKey}`);
       if (cached != null && cached !== "") {
+        await bumpUser(uid, uname, "whyCache", 0); // consultation gratuite (cache)
         const b = await readBudget();
         return res.status(200).json({ blocked: false, tracked: true, cached: true,
           data: { content: [{ type: "text", text: cached }] }, spent: b.spent, count: b.count, cap });
@@ -149,6 +180,9 @@ export default async function handler(req, res) {
       const text = (data.content || []).filter(b => b.type === "text").map(b => b.text).join("\n").trim();
       if (text) await kvSet(`alea:whycache:${cacheKey}`, text);
     }
+    // --- Suivi d'activité par utilisateur (génération neuve = payante) ---
+    const field = action === "custom" ? "custom" : action === "infos" ? "infos" : action === "betify" ? "betify" : "whyGen";
+    await bumpUser(uid, uname, field, cost);
     return res.status(200).json({ blocked: false, tracked: true, data, spent: newSpent, count: newCount, cap });
   } catch (e) {
     return res.status(502).json({ error: "Appel Anthropic échoué", detail: String(e) });
