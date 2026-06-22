@@ -160,8 +160,12 @@ function modelMarkets(home, away, lh, la, skipTotalLine) {
   out.push({ type: "Plus ou moins de buts en première mi-temps", sels: ["+0.5 but (1re MT)", "-0.5 but (1re MT)"], odds: [toOdd(h1Over05), toOdd(1 - h1Over05)], raw, est });
   out.push({ type: "Score exact", sels: [`${bestS.i}-${bestS.j}`], odds: [toOdd(bestS.p)], raw, est });
 
-  // score exact le plus probable, renvoyé à part pour affichage à côté du match
-  return { markets: out, topScore: { label: `${bestS.i}-${bestS.j}`, prob: bestS.p } };
+  // 3 scores exacts les plus probables (pour l'affichage à côté du match)
+  const cells = [];
+  for (let i = 0; i <= MAXG; i++) for (let j = 0; j <= MAXG; j++) cells.push({ i, j, p: M[i][j] });
+  cells.sort((a, b) => b.p - a.p);
+  const topScores = cells.slice(0, 3).map(c => ({ label: `${c.i}-${c.j}`, prob: c.p }));
+  return { markets: out, topScore: topScores[0], topScores };
 }
 
 /* ---------------- Dates (Europe/Paris) ---------------- */
@@ -225,10 +229,10 @@ function buildHybrid(ev) {
   else if (pH != null) { const f = fitSplit(2.6, pH, pA); lh = f.lh; la = f.la; }
   else { const e = expectedGoals(home, away); lh = e.lh; la = e.la; }
 
-  if (pH == null) { const M = scoreMatrix(lh, la); const ms = buildModelOnly(home, away, lh, la); const top = modelMarkets(home, away, lh, la, null).topScore; return { home, away, markets: ms, topScore: top }; }
+  if (pH == null) { const mm = modelMarkets(home, away, lh, la, null); const ms = buildModelOnly(home, away, lh, la); return { home, away, markets: ms, topScore: mm.topScore, topScores: mm.topScores }; }
 
-  const { markets: derived, topScore } = modelMarkets(home, away, lh, la, line);
-  return { home, away, markets: [...realMarkets, ...derived], topScore };
+  const { markets: derived, topScore, topScores } = modelMarkets(home, away, lh, la, line);
+  return { home, away, markets: [...realMarkets, ...derived], topScore, topScores };
 }
 
 async function loadFoot(apiKey, day) {
@@ -242,7 +246,7 @@ async function loadFoot(apiKey, day) {
       if (!ev.commence_time || parisDateKeyFromISO(ev.commence_time) !== wantKey) continue;
       if (!ev.home_team || !ev.away_team) continue;
       const h = buildHybrid(ev);
-      matches.push({ id: ev.id, home: h.home, away: h.away, time: parisTime(ev.commence_time), date: parisDateKeyFromISO(ev.commence_time), offset: day, markets: h.markets, topScore: h.topScore });
+      matches.push({ id: ev.id, home: h.home, away: h.away, time: parisTime(ev.commence_time), date: parisDateKeyFromISO(ev.commence_time), offset: day, markets: h.markets, topScore: h.topScore, topScores: h.topScores });
     }
     if (!matches.length) continue;
     if (day === 0) attachScores(matches, await fetchScores(key, apiKey)); // 1 crédit
