@@ -755,7 +755,7 @@ function setDay(o){state.dayOffset=o;$('dToday').setAttribute('aria-pressed',Str
 
 function validProfile(){return $('firstNameIn').value.trim().length>0;}
 ['firstNameIn','userIn'].forEach(id=>$(id).addEventListener('input',()=>{$('createProfile').disabled=!validProfile();}));
-$('createProfile').onclick=()=>{prof.firstName=$('firstNameIn').value.trim();prof.username=$('userIn').value.trim();saveProf();refreshHome();show('home');};
+$('createProfile').onclick=()=>{prof.firstName=$('firstNameIn').value.trim();prof.username=$('userIn').value.trim();saveProf();registerUser();refreshHome();show('home');};
 $('editProfile').onclick=()=>{$('firstNameIn').value=prof.firstName;$('userIn').value=prof.username;$('createProfile').disabled=!validProfile();show('profile');};
 
 function openPrefs(){buildChecks();show('prefs');}
@@ -910,8 +910,62 @@ async function refreshInfos(key,btn){
   btn.textContent='↻ Dernières infos';btn.disabled=false;
 }
 
+/* ===== ENREGISTREMENT PROFIL (serveur) + ADMIN ===== */
+// Envoie le profil au serveur (création OU rattrapage auto au chargement). Silencieux si indispo.
+function registerUser(){
+  try{
+    if(location.hostname.endsWith('vercel.app')||location.hostname.endsWith('.now.sh')){
+      if(!hasProfile())return;
+      fetch('/api/users',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({firstName:prof.firstName,username:prof.username})}).catch(()=>{});
+    }
+  }catch(e){}
+}
+// Panneau admin (liste des inscrits), accessible via l'adresse se terminant par #admin.
+function openAdmin(){
+  let ov=$('adminOverlay');
+  if(!ov){
+    ov=document.createElement('div');ov.id='adminOverlay';
+    ov.style.cssText='position:fixed;inset:0;z-index:200;background:rgba(8,10,14,.96);overflow:auto;padding:calc(env(safe-area-inset-top) + 18px) 16px 24px;font-family:var(--body)';
+    ov.innerHTML=`<div style="max-width:560px;margin:0 auto">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:16px">
+        <div style="font-family:var(--disp);font-weight:800;font-size:18px;color:var(--gold)">Admin · inscrits</div>
+        <button id="admClose" style="margin-left:auto;background:var(--ink-2);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:6px 12px">Fermer</button>
+      </div>
+      <div style="display:flex;gap:8px;margin-bottom:14px">
+        <input id="admCode" type="password" placeholder="Code admin" style="flex:1;background:var(--ink-2);border:1px solid var(--line);color:var(--txt);border-radius:10px;padding:10px 12px" />
+        <button id="admGo" class="btn" style="flex:none">Voir</button>
+      </div>
+      <div id="admResult" style="font-size:14px;color:var(--txt-dim)">Entre ton code pour afficher la liste.</div>
+    </div>`;
+    document.body.appendChild(ov);
+    $('admClose').onclick=()=>{ov.remove();if(location.hash==='#admin')history.replaceState(null,'',location.pathname);};
+    $('admGo').onclick=loadAdminList;
+    $('admCode').addEventListener('keydown',e=>{if(e.key==='Enter')loadAdminList();});
+  }
+  ov.style.display='block';
+}
+function loadAdminList(){
+  const code=$('admCode').value.trim();const box=$('admResult');
+  if(!code){box.textContent='Entre ton code.';return;}
+  box.textContent='Chargement…';
+  fetch('/api/users?code='+encodeURIComponent(code)).then(r=>r.json()).then(j=>{
+    if(!j.ok){box.textContent=j.error||'Erreur.';return;}
+    if(!j.users.length){box.innerHTML='<b>Aucun inscrit pour l\'instant.</b>';return;}
+    const fmt=d=>{try{return new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}};
+    box.innerHTML=`<div style="color:var(--gold);font-family:var(--mono);font-size:12px;margin-bottom:10px">${j.total} inscrit${j.total>1?'s':''}</div>`+
+      j.users.map(u=>`<div style="background:var(--card);border:1px solid var(--line);border-radius:10px;padding:10px 12px;margin-bottom:8px">
+        <div style="font-family:var(--disp);font-weight:700;font-size:15px;color:var(--txt)">${esc(u.firstName||'—')} <span style="color:var(--txt-mut);font-weight:400">@${esc(u.username||'—')}</span></div>
+        <div style="font-family:var(--mono);font-size:10.5px;color:var(--txt-mut);margin-top:4px">inscrit ${fmt(u.firstSeen)} · vu ${fmt(u.lastSeen)} · ${u.visits||1} visite${(u.visits||1)>1?'s':''}</div>
+      </div>`).join('');
+  }).catch(()=>{box.textContent='Erreur réseau.';});
+}
+function checkAdminHash(){if(location.hash==='#admin')openAdmin();}
+window.addEventListener('hashchange',checkAdminHash);
+
 /* ===== INIT ===== */
 loadProf();refreshHome();show(hasProfile()?'home':'profile');
+registerUser();   // rattrapage auto : enregistre le profil déjà présent sur ce téléphone
+checkAdminHash();
 (function initBudget(){
   if(CONFIG.WHY_ENDPOINT!=='/api/why')return; // aperçu Claude.ai : pas de suivi de budget possible
   fetch('/api/usage').then(r=>r.json()).then(refreshBudgetUI).catch(()=>{});
