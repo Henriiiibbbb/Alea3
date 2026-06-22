@@ -852,11 +852,20 @@ async function runBetify(){
   const note=$('cBetifyNote').value.trim();
   const btn=$('cBetifyRun');btn.disabled=true;const old=btn.textContent;btn.innerHTML='<span class="dots"><i></i><i></i><i></i></span> analyse…';
   $('cBetifyResult').innerHTML='';
-  const sys=`Tu es un analyste paris sportifs honnête, façon trader/quant. On te donne une ou plusieurs captures de la page STATISTIQUES de Betify. Lis attentivement les chiffres visibles et fais ressortir : 1) les tendances solides qui reviennent souvent ; 2) les marchés de NICHE sous-estimés auxquels on ne pense pas (corners, cartons, mi-temps, tirs, etc.) mais qui ressortent ; 3) si plusieurs matchs, ce qui revient sur (presque) tous. Appuie-toi UNIQUEMENT sur les chiffres lus sur les images, cite-les. Français, clair, 150-220 mots, paragraphes courts (pas de longue liste). Si une image est illisible ou une donnée absente, dis-le honnêtement. Termine par : une tendance passée n'est pas une garantie.`;
+  const sys=`Tu es un analyste data paris sportifs, façon trader/quant. On te donne une ou plusieurs captures Betify d'un match (cotes et/ou stats), et tu disposes de la RECHERCHE WEB.
+
+Méthode :
+1) Lis la capture pour identifier le match (équipes, compétition) et les marchés proposés (corners, cartons, tirs, buts…).
+2) Pour les marchés intéressants, VA CHERCHER sur le web les vraies statistiques récentes des équipes (5 à 10 derniers matchs) : moyenne par match ET par mi-temps quand c'est dispo, tendance DOMICILE vs EXTÉRIEUR, contre quel niveau d'adversaire, régularité.
+3) Croise ces stats avec les cotes vues sur la capture pour repérer où il pourrait y avoir de la valeur.
+
+Pour chaque marché traité, donne : les moyennes chiffrées (par match / mi-temps), domicile vs extérieur, l'impact de l'adversaire et du contexte (enjeu, style, absences), et le POURQUOI concret. Termine par les 2-3 tendances les plus exploitables, marchés de niche inclus.
+
+Honnêteté stricte : cite tes chiffres et reste prudent sur leur fiabilité (sources web variables) ; si une donnée fine (ex : corners par mi-temps) est introuvable, dis-le au lieu d'inventer. Distingue clairement ce qui vient de la CAPTURE et ce qui vient de la RECHERCHE WEB. Français, structuré par marché, paragraphes courts. Termine : une tendance passée n'est pas une garantie.`;
   const content=betifyPhotos.map(p=>({type:'image',source:{type:'base64',media_type:p.media_type,data:p.b64}}));
-  content.push({type:'text',text:`Analyse ces ${betifyPhotos.length} capture(s) de stats Betify et sors les tendances marquantes${note?` (focus : ${note})`:''}. Cite les chiffres vus.`});
+  content.push({type:'text',text:`Identifie le match sur ces ${betifyPhotos.length} capture(s) Betify, puis recherche sur le web les vraies stats récentes des deux équipes${note?` (focus : ${note})`:''} : corners, cartons, tirs, buts — moyennes par match et par mi-temps, domicile/extérieur, impact adversaire/contexte, et le pourquoi. Croise avec les cotes vues. Cite chiffres et sources.`});
   try{
-    const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1000,system:sys,messages:[{role:'user',content}],__action:'betify'});
+    const data=await callAI({model:'claude-sonnet-4-6',max_tokens:1600,system:sys,messages:[{role:'user',content}],tools:[{type:'web_search_20250305',name:'web_search'}],__action:'betify'});
     const text=(data.content||[]).filter(b=>b.type==='text').map(b=>b.text).join('\n').trim();
     $('cBetifyResult').innerHTML=`<div class="resultcard"><div class="ai-badge">✦ tendances Betify</div>${mdToHtml(text||'Rien d\'exploitable lu sur les images.')}<div class="disclaim"><b>Rappel.</b> Tendances lues sur tes captures, pas une garantie de gain. 18+.</div></div>`;
   }catch(err){
@@ -1013,15 +1022,14 @@ function openAdmin(){
   let ov=$('adminOverlay');
   if(!ov){
     ov=document.createElement('div');ov.id='adminOverlay';
-    ov.style.cssText='position:fixed;inset:0;z-index:200;background:rgba(8,10,14,.97);overflow:auto;display:flex;flex-direction:column;justify-content:center;padding:calc(env(safe-area-inset-top) + 18px) 16px 24px;font-family:var(--body)';
+    ov.style.cssText='position:fixed;inset:0;z-index:200;background:rgba(8,10,14,.97);overflow:auto;display:flex;flex-direction:column;padding:calc(env(safe-area-inset-top) + 18px) 16px 24px;font-family:var(--body)';
     const keyStyle='width:74px;height:74px;border-radius:50%;border:1px solid var(--line);background:var(--ink-2);color:var(--txt);font-family:var(--disp);font-size:28px;font-weight:600;display:flex;align-items:center;justify-content:center';
-    ov.innerHTML=`<div style="max-width:420px;margin:0 auto">
-      <div style="display:flex;align-items:center;gap:10px;margin-bottom:18px">
+    ov.innerHTML=`<div style="display:flex;align-items:center;gap:10px;max-width:420px;width:100%;margin:0 auto;flex:none">
         <div style="font-family:var(--disp);font-weight:800;font-size:18px;color:var(--gold)">Admin · inscrits</div>
         <button id="admClose" style="margin-left:auto;background:var(--ink-2);border:1px solid var(--line);color:var(--txt);border-radius:999px;padding:6px 12px">Fermer</button>
       </div>
-      <div id="admView">
-        <div style="text-align:center;color:var(--txt-dim);font-size:13px;margin-bottom:14px">Entre ton code admin</div>
+      <div id="admView" style="flex:1;display:flex;flex-direction:column;justify-content:center;max-width:420px;width:100%;margin:0 auto;padding-bottom:6vh">
+        <div id="admPrompt" style="text-align:center;color:var(--txt-dim);font-size:13px;margin-bottom:14px">Entre ton code admin</div>
         <div id="admDots" style="display:flex;gap:12px;justify-content:center;min-height:18px;margin-bottom:26px"></div>
         <div id="admPad" style="display:grid;grid-template-columns:repeat(3,1fr);gap:18px;justify-items:center;max-width:300px;margin:0 auto">
           ${[1,2,3,4,5,6,7,8,9].map(n=>`<button class="admkey" data-k="${n}" style="${keyStyle}">${n}</button>`).join('')}
@@ -1030,8 +1038,7 @@ function openAdmin(){
           <button class="admkey" data-k="ok" style="${keyStyle};background:var(--gold);color:#1a1303;border-color:var(--gold)">✓</button>
         </div>
         <div id="admResult" style="font-size:14px;color:var(--txt-dim);text-align:center;margin-top:20px"></div>
-      </div>
-    </div>`;
+      </div>`;
     document.body.appendChild(ov);
     let code='';
     const dots=()=>{ $('admDots').innerHTML = code.split('').map(()=>`<span style="width:13px;height:13px;border-radius:50%;background:var(--gold);display:inline-block"></span>`).join('') || '<span style="color:var(--txt-mut);font-size:12px">— — — —</span>'; };
@@ -1054,6 +1061,9 @@ function loadAdminList(code){
   fetch('/api/users?code='+encodeURIComponent(code)).then(r=>r.json()).then(j=>{
     if(!j.ok){box.textContent=j.error||'Code incorrect.';return;}
     if(!j.users.length){box.innerHTML='<b>Aucun inscrit pour l\'instant.</b>';return;}
+    ['admPrompt','admDots','admPad'].forEach(id=>{const el=$(id);if(el)el.style.display='none';});
+    const view=$('admView');if(view){view.style.justifyContent='flex-start';view.style.paddingBottom='0';}
+    box.style.marginTop='0';
     const fmt=d=>{try{return new Date(d).toLocaleDateString('fr-FR',{day:'2-digit',month:'2-digit',hour:'2-digit',minute:'2-digit'});}catch(e){return '';}};
     box.style.textAlign='left';
     box.innerHTML=`<div style="color:var(--gold);font-family:var(--mono);font-size:12px;margin:8px 0 10px">${j.total} inscrit${j.total>1?'s':''}</div>`+
